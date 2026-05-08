@@ -1,0 +1,4 @@
+# Elgato Stream Deck devices. Installed to /etc/udev/rules.d/.
+# TAG+="uaccess" grants the active local desktop session access on systemd systems.
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0fd9", TAG+="uaccess", MODE="0660"
+SUBSYSTEM=="usb", ATTR{idVendor}=="0fd9", TAG+="uaccess", MODE="0660"

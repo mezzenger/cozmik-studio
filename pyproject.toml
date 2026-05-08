@@ -1,0 +1,16 @@
+[project]
+name = "streamdeck-studio"
+version = "0.1.0"
+description = "Linux Stream Deck button programmer and launcher app"
+requires-python = ">=3.11"
+dependencies = [
+  "Pillow",
+  "streamdeck",
+]
+
+[project.scripts]
+streamdeck-studio = "streamdeck_studio.ui:run"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
