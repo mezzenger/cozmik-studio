@@ -36,6 +36,11 @@ MAC_APP_LAUNCHERS = {
     "System Settings": (("gnome-control-center",), ("org.gnome.Settings.desktop",)),
 }
 
+COMMAND_ALIASES = {
+    "calculator": ("gnome-calculator",),
+    "settings": ("gnome-control-center",),
+}
+
 
 def run_action(config: ButtonConfig, copy_text: Callable[[str], None] | None = None, paste: Callable[[], None] | None = None) -> str:
     action_type = config.action_type
@@ -54,15 +59,17 @@ def run_action(config: ButtonConfig, copy_text: Callable[[str], None] | None = N
             raise ActionError(f"Invalid command: {exc}") from exc
         if not args:
             raise ActionError("The selected button has no command.")
+        args = list(_translated_command(args))
         subprocess.Popen(args, start_new_session=True)
         return f"Started command: {target}"
     if action_type == "shell":
         subprocess.Popen(target, shell=True, start_new_session=True)
         return f"Started shell command: {target}"
     if action_type == "url":
-        if not webbrowser.open(target, new=2):
-            raise ActionError(f"Could not open URL: {target}")
-        return f"Opened URL: {target}"
+        url = _normalized_url(target)
+        if not webbrowser.open(url, new=2):
+            raise ActionError(f"Could not open URL: {url}")
+        return f"Opened URL: {url}"
     if action_type == "file":
         translated = _translated_launcher(target)
         if translated:
@@ -99,6 +106,24 @@ def _translated_launcher(target: str) -> list[str]:
                 return [gio, "launch", desktop_file]
     command = _first_available_command(commands)
     return list(command) if command else []
+
+
+def _translated_command(args: list[str]) -> tuple[str, ...]:
+    alias = COMMAND_ALIASES.get(args[0])
+    if not alias:
+        return tuple(args)
+    command = _first_available_command(alias)
+    if not command:
+        return tuple(args)
+    return (*command, *args[1:])
+
+
+def _normalized_url(target: str) -> str:
+    if "://" in target:
+        return target
+    if target.startswith(("mailto:", "tel:")):
+        return target
+    return f"https://{target}"
 
 
 def _mac_app_name(target: str) -> str:

@@ -19,6 +19,18 @@ def test_command_action_splits_arguments(monkeypatch):
     assert calls[0][1]["start_new_session"] is True
 
 
+def test_command_action_resolves_gnome_alias(monkeypatch):
+    calls = []
+
+    monkeypatch.setattr("streamdeck_studio.actions.shutil.which", lambda command: f"/usr/bin/{command}" if command == "gnome-control-center" else None)
+    monkeypatch.setattr("streamdeck_studio.actions.subprocess.Popen", lambda args, **kwargs: calls.append((args, kwargs)))
+
+    message = run_action(ButtonConfig(action_type="command", target="settings"))
+
+    assert message == "Started command: settings"
+    assert calls[0][0] == ["gnome-control-center"]
+
+
 def test_command_action_rejects_bad_quoting():
     with pytest.raises(ActionError):
         run_action(ButtonConfig(action_type="command", target="echo 'unterminated"))
@@ -46,6 +58,17 @@ def test_text_action_can_split_press_and_release():
 
     assert paste_text_action(config, paste=lambda: calls.append(("paste", ""))) == "Pasted text."
     assert calls == [("copy", "expected target"), ("paste", "")]
+
+
+def test_url_action_adds_https_scheme(monkeypatch):
+    calls = []
+
+    monkeypatch.setattr("streamdeck_studio.actions.webbrowser.open", lambda url, **kwargs: calls.append((url, kwargs)) or True)
+
+    message = run_action(ButtonConfig(action_type="url", target="example.com"))
+
+    assert message == "Opened URL: https://example.com"
+    assert calls == [("https://example.com", {"new": 2})]
 
 
 def test_file_action_translates_mac_app_to_linux_desktop_file(monkeypatch, tmp_path):
