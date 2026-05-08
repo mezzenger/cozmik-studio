@@ -20,6 +20,7 @@ from gi.repository import Adw, Gdk, GdkPixbuf, Gio, GLib, Gtk
 
 from .actions import ActionError, copy_text_action, paste_text_action, run_action
 from .deck import StreamDeckController
+from .diagnostics import profile_diagnostics, redact_target
 from .images import render_button_image
 from .importers import ImportProfileError, import_profile
 from .model import ACTION_TYPES, Profile, config_dir, load_profile, save_profile
@@ -72,6 +73,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._suppress_release: set[int] = set()
         self._last_key_event = "No hardware key events yet."
         self._last_action = "No action run yet."
+        self._last_import_report = "No import report yet."
 
         self._build_ui()
         self._connect_deck()
@@ -345,7 +347,7 @@ class MainWindow(Adw.ApplicationWindow):
             return False
         try:
             config = self.profile.get_button(index)
-            self._log(f"release key={index} label={config.label!r} action={config.action_type} target={config.target!r}")
+            self._log(f"release key={index} label={config.label!r} action={config.action_type} target={redact_target(config)!r}")
             if config.action_type == "text":
                 message = paste_text_action(config, paste=self._paste)
                 self._last_action = f"release key={index}: {message}"
@@ -372,7 +374,7 @@ class MainWindow(Adw.ApplicationWindow):
             return False
         try:
             config = self.profile.get_button(index)
-            self._log(f"press key={index} label={config.label!r} action={config.action_type} target={config.target!r}")
+            self._log(f"press key={index} label={config.label!r} action={config.action_type} target={redact_target(config)!r}")
             if config.action_type == "text":
                 message = copy_text_action(config, copy_text=self._copy_text)
                 self._last_action = f"press key={index}: {message}"
@@ -425,7 +427,11 @@ class MainWindow(Adw.ApplicationWindow):
                     self._select_button(0)
                     self.deck.apply_profile(self.profile)
                     self._save_profile(silent=True)
-                    self._set_status(f"Imported {file.get_path()}.")
+                    report = profile_diagnostics(self.profile)
+                    self._last_import_report = report.render()
+                    self._last_action = f"Imported {Path(file.get_path()).name}: {report.short_summary()}"
+                    self._refresh_diagnostics()
+                    self._set_status(f"Imported {file.get_path()}: {report.short_summary()}.")
                 except (ImportProfileError, OSError, json.JSONDecodeError, ValueError) as exc:
                     self._set_status(f"Import failed: {exc}")
         dialog.destroy()
@@ -515,10 +521,12 @@ class MainWindow(Adw.ApplicationWindow):
             f"Selected: {self.selected_index} (row {self.selected_index // self.profile.columns}, column {self.selected_index % self.profile.columns})",
             f"Label: {config.label or '-'}",
             f"Action: {config.action_type}",
-            f"Target: {config.target or '-'}",
+            f"Target: {redact_target(config)}",
             f"Last key: {self._last_key_event}",
             f"Last action: {self._last_action}",
             f"Helpers: {helpers}",
+            "",
+            self._last_import_report,
         ]
         self.diagnostics_view.get_buffer().set_text("\n".join(lines))
 
