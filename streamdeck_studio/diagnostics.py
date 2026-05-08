@@ -4,7 +4,7 @@ from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 
-from .actions import _mac_app_name, _translated_launcher
+from .actions import MAC_APP_LAUNCHERS, _mac_app_name, _translated_launcher
 from .model import ButtonConfig, Profile
 
 
@@ -92,17 +92,19 @@ def _button_issues(profile: Profile, page_name: str, index: int, config: ButtonC
             issues.append(_issue(page_name, index, config, "page action has no target"))
         elif target not in PAGE_SENTINELS and target not in profile.pages:
             issues.append(_issue(page_name, index, config, f"page target is missing: {target}"))
-    elif config.action_type in {"command", "shell", "url", "file", "text"} and not target:
+    elif config.action_type in {"command", "shell", "url", "file", "text", "media", "shortcut"} and not target:
         issues.append(_issue(page_name, index, config, f"{config.action_type} action has no target"))
 
     if config.action_type == "file" and target:
         mac_app = _mac_app_name(target)
         if mac_app:
             translated = _translated_launcher(target)
-            if translated:
-                issues.append(_issue(page_name, index, config, f"macOS app maps to: {' '.join(translated)}"))
-            else:
-                issues.append(_issue(page_name, index, config, f"macOS app needs Linux launcher mapping: {mac_app}"))
+            if not translated:
+                if mac_app in MAC_APP_LAUNCHERS:
+                    message = f"Linux launcher is not installed for macOS app: {mac_app}"
+                else:
+                    message = f"macOS app needs Linux launcher mapping: {mac_app}"
+                issues.append(_issue(page_name, index, config, message))
         elif not Path(target).expanduser().exists():
             issues.append(_issue(page_name, index, config, "file target does not exist on this computer"))
 

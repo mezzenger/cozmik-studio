@@ -24,14 +24,14 @@ def test_profile_diagnostics_summarizes_import_without_text_targets(monkeypatch)
     assert "very private value" not in rendered
 
 
-def test_profile_diagnostics_notes_translated_mac_launcher(monkeypatch):
+def test_profile_diagnostics_does_not_flag_translated_mac_launcher(monkeypatch):
     monkeypatch.setattr("streamdeck_studio.diagnostics._translated_launcher", lambda _target: ["gio", "launch", "org.gnome.Calculator.desktop"])
     profile = Profile(name="Imported", pages={"main": {}}, page_names={"main": "Main"})
     profile.set_button(0, ButtonConfig(label="Calculator", action_type="file", target="/System/Applications/Calculator.app"), page_id="main")
 
     rendered = profile_diagnostics(profile).render()
 
-    assert "macOS app maps to: gio launch org.gnome.Calculator.desktop" in rendered
+    assert "Issues: none found" in rendered
 
 
 def test_redact_target_only_hides_text_actions():

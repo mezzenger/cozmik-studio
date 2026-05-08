@@ -358,6 +358,12 @@ def _button_from_action(action: dict[str, Any], manifest_dir: Path | None = None
         action_type = "page"
         target = "__next__"
         subtitle = "PAGE"
+    elif "system.multimedia" in uuid:
+        action_type, target, label, subtitle = _multimedia_action(settings, label)
+    elif "system.hotkey" in uuid:
+        known = _known_hotkey_action(label)
+        if known:
+            action_type, target, subtitle = known
     return ButtonConfig(label=label, action_type=action_type, target=target, subtitle=subtitle, image_path=image_path)
 
 
@@ -374,6 +380,30 @@ def _infer_action_type(uuid: str, settings: dict[str, Any], target: str) -> str:
     if "system" in uuid and target:
         return "file"
     return "none"
+
+
+def _multimedia_action(settings: dict[str, Any], label: str) -> tuple[str, str, str, str]:
+    actions = {
+        4: ("volume-mute", "Mute"),
+        5: ("volume-up", "Volume Up"),
+        6: ("volume-down", "Volume Down"),
+    }
+    action = actions.get(settings.get("actionIdx"))
+    if not action:
+        return "none", "", label, "Imported"
+    target, fallback_label = action
+    return "media", target, label if label != "Multimedia" else fallback_label, "MEDIA"
+
+
+def _known_hotkey_action(label: str) -> tuple[str, str, str] | None:
+    normalized = label.lower()
+    if normalized == "emoji keyboard":
+        return "shortcut", "ctrl+period", "SHORTCUT"
+    if normalized == "screen shot":
+        return "command", "gnome-screenshot -i", "COMMAND"
+    if normalized == "screen record":
+        return "shortcut", "ctrl+alt+shift+r", "SHORTCUT"
+    return None
 
 
 def _first_text(*containers: dict[str, Any], keys: tuple[str, ...]) -> str:

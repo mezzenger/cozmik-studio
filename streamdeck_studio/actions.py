@@ -41,6 +41,48 @@ COMMAND_ALIASES = {
     "settings": ("gnome-control-center",),
 }
 
+_YDOTOOL_KEYS = {
+    "ctrl": 29,
+    "control": 29,
+    "alt": 56,
+    "shift": 42,
+    "super": 125,
+    "cmd": 125,
+    "meta": 125,
+    "r": 19,
+    "period": 52,
+    ".": 52,
+    "semicolon": 39,
+    ";": 39,
+    "print": 99,
+}
+
+_WTYPE_MODIFIERS = {
+    "ctrl": "ctrl",
+    "control": "ctrl",
+    "alt": "alt",
+    "shift": "shift",
+    "super": "logo",
+    "cmd": "logo",
+    "meta": "logo",
+}
+
+_WTYPE_KEYS = {
+    "period": ".",
+    "semicolon": ";",
+}
+
+_XDOTOOL_KEYS = {
+    "period": "period",
+    ".": "period",
+    "semicolon": "semicolon",
+    ";": "semicolon",
+    "print": "Print",
+    "super": "Super",
+    "cmd": "Super",
+    "meta": "Super",
+}
+
 
 def run_action(config: ButtonConfig, copy_text: Callable[[str], None] | None = None, paste: Callable[[], None] | None = None) -> str:
     action_type = config.action_type
@@ -50,6 +92,10 @@ def run_action(config: ButtonConfig, copy_text: Callable[[str], None] | None = N
         return "No action configured."
     if action_type == "page":
         return "Switched page."
+    if action_type == "media":
+        return _run_media_action(target)
+    if action_type == "shortcut":
+        return _run_shortcut_action(target)
     if not target:
         raise ActionError("The selected button has no target.")
     if action_type == "command":
@@ -92,6 +138,86 @@ def run_action(config: ButtonConfig, copy_text: Callable[[str], None] | None = N
         return paste_text_action(config, paste=paste)
 
     raise ActionError(f"Unsupported action type: {action_type}")
+
+
+def _run_media_action(target: str) -> str:
+    if target == "volume-mute":
+        commands = (
+            ("wpctl", "set-mute", "@DEFAULT_AUDIO_SINK@", "toggle"),
+            ("pactl", "set-sink-mute", "@DEFAULT_SINK@", "toggle"),
+            ("amixer", "set", "Master", "toggle"),
+        )
+    elif target == "volume-down":
+        commands = (
+            ("wpctl", "set-volume", "@DEFAULT_AUDIO_SINK@", "5%-"),
+            ("pactl", "set-sink-volume", "@DEFAULT_SINK@", "-5%"),
+            ("amixer", "set", "Master", "5%-"),
+        )
+    elif target == "volume-up":
+        commands = (
+            ("wpctl", "set-volume", "@DEFAULT_AUDIO_SINK@", "5%+"),
+            ("pactl", "set-sink-volume", "@DEFAULT_SINK@", "+5%"),
+            ("amixer", "set", "Master", "5%+"),
+        )
+    else:
+        raise ActionError(f"Unsupported media action: {target}")
+    for command in commands:
+        executable = shutil.which(command[0])
+        if executable:
+            subprocess.Popen([executable, *command[1:]], start_new_session=True)
+            return f"Ran media action: {target}"
+    raise ActionError("No audio control helper found. Install wireplumber, pulseaudio-utils, or alsa-utils.")
+
+
+def _run_shortcut_action(target: str) -> str:
+    keys = _parse_shortcut(target)
+    if not keys:
+        raise ActionError("The selected shortcut has no target.")
+    if _send_shortcut_with_ydotool(keys) or _send_shortcut_with_wtype(keys) or _send_shortcut_with_xdotool(keys):
+        return f"Sent shortcut: {target}"
+    raise ActionError("No keyboard helper found. Install ydotool, wtype, or xdotool.")
+
+
+def _parse_shortcut(target: str) -> list[str]:
+    return [part.strip().lower() for part in target.replace(" ", "").split("+") if part.strip()]
+
+
+def _send_shortcut_with_ydotool(keys: list[str]) -> bool:
+    executable = shutil.which("ydotool")
+    codes = [_YDOTOOL_KEYS.get(key) for key in keys]
+    if not executable or any(code is None for code in codes):
+        return False
+    down = [f"{code}:1" for code in codes]
+    up = [f"{code}:0" for code in reversed(codes)]
+    subprocess.run([executable, "key", *down, *up], check=True, env=_paste_env("ydotool"))
+    return True
+
+
+def _send_shortcut_with_wtype(keys: list[str]) -> bool:
+    executable = shutil.which("wtype")
+    if not executable:
+        return False
+    modifiers = [key for key in keys[:-1] if key in _WTYPE_MODIFIERS]
+    key = _WTYPE_KEYS.get(keys[-1], keys[-1])
+    if len(modifiers) != len(keys) - 1 or len(key) != 1:
+        return False
+    args = [executable]
+    for modifier in modifiers:
+        args.extend(("-M", _WTYPE_MODIFIERS[modifier]))
+    args.append(key)
+    for modifier in reversed(modifiers):
+        args.extend(("-m", _WTYPE_MODIFIERS[modifier]))
+    subprocess.run(args, check=True)
+    return True
+
+
+def _send_shortcut_with_xdotool(keys: list[str]) -> bool:
+    executable = shutil.which("xdotool")
+    if not executable:
+        return False
+    shortcut = "+".join(_XDOTOOL_KEYS.get(key, key) for key in keys)
+    subprocess.run([executable, "key", shortcut], check=True)
+    return True
 
 
 def _translated_launcher(target: str) -> list[str]:

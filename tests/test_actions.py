@@ -90,3 +90,33 @@ def test_file_action_reports_unmapped_mac_app(monkeypatch):
 
     with pytest.raises(ActionError, match="No Linux launcher found"):
         run_action(ButtonConfig(action_type="file", target="/System/Applications/FaceTime.app"))
+
+
+def test_media_action_uses_wpctl_when_available(monkeypatch):
+    calls = []
+
+    monkeypatch.setattr("streamdeck_studio.actions.shutil.which", lambda command: f"/usr/bin/{command}" if command == "wpctl" else None)
+    monkeypatch.setattr("streamdeck_studio.actions.subprocess.Popen", lambda args, **kwargs: calls.append((args, kwargs)))
+
+    message = run_action(ButtonConfig(action_type="media", target="volume-up"))
+
+    assert message == "Ran media action: volume-up"
+    assert calls == [(["/usr/bin/wpctl", "set-volume", "@DEFAULT_AUDIO_SINK@", "5%+"], {"start_new_session": True})]
+
+
+def test_shortcut_action_uses_ydotool_when_available(monkeypatch):
+    calls = []
+
+    monkeypatch.setattr("streamdeck_studio.actions.shutil.which", lambda command: f"/usr/bin/{command}" if command == "ydotool" else None)
+    monkeypatch.setattr("streamdeck_studio.actions.subprocess.run", lambda args, **kwargs: calls.append((args, kwargs)))
+
+    message = run_action(ButtonConfig(action_type="shortcut", target="ctrl+alt+shift+r"))
+
+    assert message == "Sent shortcut: ctrl+alt+shift+r"
+    assert calls[0][1]["check"] is True
+    assert calls == [
+        (
+            ["/usr/bin/ydotool", "key", "29:1", "56:1", "42:1", "19:1", "19:0", "42:0", "56:0", "29:0"],
+            calls[0][1],
+        )
+    ]

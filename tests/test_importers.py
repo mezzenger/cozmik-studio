@@ -159,3 +159,42 @@ def test_import_elgato_v3_uses_page_order_without_changing_orientation(tmp_path)
     assert profile.pages["PAGE-1"]["14"].target == "PAGE-2"
     assert profile.pages["PAGE-2"]["10"].target == "PAGE-1"
     assert profile.pages["FOLDER-1"]["0"].target == "PAGE-1"
+
+
+def test_import_elgato_multimedia_and_known_hotkeys(tmp_path):
+    path = tmp_path / "main.streamDeckProfile"
+    payload = {
+        "Controllers": [
+            {
+                "Actions": {
+                    "0,0": {
+                        "UUID": "com.elgato.streamdeck.system.multimedia",
+                        "States": [{"Title": "Multimedia"}],
+                        "Settings": {"actionIdx": 5},
+                    },
+                    "1,0": {
+                        "UUID": "com.elgato.streamdeck.system.hotkey",
+                        "States": [{"Title": "Screen Shot"}],
+                        "Settings": {"Hotkeys": []},
+                    },
+                    "2,0": {
+                        "UUID": "com.elgato.streamdeck.system.hotkey",
+                        "States": [{"Title": "Emoji Keyboard"}],
+                        "Settings": {"Hotkeys": []},
+                    },
+                }
+            }
+        ]
+    }
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr("manifest.json", json.dumps(payload))
+
+    profile = import_profile(path)
+
+    assert profile.get_button(0).label == "Volume Up"
+    assert profile.get_button(0).action_type == "media"
+    assert profile.get_button(0).target == "volume-up"
+    assert profile.get_button(1).action_type == "command"
+    assert profile.get_button(1).target == "gnome-screenshot -i"
+    assert profile.get_button(2).action_type == "shortcut"
+    assert profile.get_button(2).target == "ctrl+period"

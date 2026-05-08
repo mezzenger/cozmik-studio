@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 
-ACTION_TYPES = ("none", "command", "shell", "url", "file", "text", "page")
+ACTION_TYPES = ("none", "command", "shell", "url", "file", "text", "page", "media", "shortcut")
 
 
 @dataclass
