@@ -9,7 +9,7 @@ dependencies = [
 ]
 
 [project.scripts]
-streamdeck-studio = "streamdeck_studio.ui:run"
+streamdeck-studio = "streamdeck_studio.gtk_ui:run"
 
 [build-system]
 requires = ["setuptools>=68"]

@@ -16,6 +16,27 @@ class ActionError(RuntimeError):
     pass
 
 
+MAC_APP_LAUNCHERS = {
+    "Amazon Kindle": (("kindle",), ()),
+    "Books": (("foliate", "gnome-books"), ()),
+    "Calculator": (("gnome-calculator", "kcalc"), ("org.gnome.Calculator.desktop",)),
+    "Elgato Stream Deck": (("streamdeck-studio",), ("streamdeck-studio.desktop",)),
+    "FaceTime": ((), ()),
+    "Google Chrome": (("google-chrome", "google-chrome-stable", "chromium", "firefox"), ("google-chrome.desktop", "chromium.desktop", "firefox.desktop")),
+    "Joplin": (("joplin",), ("joplin.desktop", "net.cozic.joplin_desktop.desktop")),
+    "LibreOffice": (("libreoffice",), ("libreoffice-startcenter.desktop",)),
+    "Mail": (("evolution", "thunderbird"), ("org.gnome.Evolution.desktop", "thunderbird.desktop")),
+    "Messages": ((), ()),
+    "Messenger": (("caprine",), ("caprine.desktop",)),
+    "Microsoft Excel": (("libreoffice", "--calc"), ("libreoffice-calc.desktop",)),
+    "Microsoft Word": (("libreoffice", "--writer"), ("libreoffice-writer.desktop",)),
+    "Photo Booth": (("cheese", "gnome-snapshot"), ("org.gnome.Snapshot.desktop", "org.gnome.Cheese.desktop")),
+    "Screenshot": (("gnome-screenshot",), ("org.gnome.Screenshot.desktop",)),
+    "Spotify": (("spotify",), ("spotify.desktop", "spotify-launcher.desktop")),
+    "System Settings": (("gnome-control-center",), ("org.gnome.Settings.desktop",)),
+}
+
+
 def run_action(config: ButtonConfig, copy_text: Callable[[str], None] | None = None, paste: Callable[[], None] | None = None) -> str:
     action_type = config.action_type
     target = config.target.strip()
@@ -43,8 +64,15 @@ def run_action(config: ButtonConfig, copy_text: Callable[[str], None] | None = N
             raise ActionError(f"Could not open URL: {target}")
         return f"Opened URL: {target}"
     if action_type == "file":
+        translated = _translated_launcher(target)
+        if translated:
+            subprocess.Popen(translated, start_new_session=True)
+            return f"Started: {' '.join(translated)}"
         path = Path(os.path.expanduser(target))
         if not path.exists():
+            mac_app = _mac_app_name(target)
+            if mac_app:
+                raise ActionError(f"No Linux launcher found for macOS app: {mac_app}.")
             raise ActionError(f"Path does not exist: {path}")
         opener = shutil.which("xdg-open")
         if not opener:
@@ -57,6 +85,45 @@ def run_action(config: ButtonConfig, copy_text: Callable[[str], None] | None = N
         return paste_text_action(config, paste=paste)
 
     raise ActionError(f"Unsupported action type: {action_type}")
+
+
+def _translated_launcher(target: str) -> list[str]:
+    app_name = _mac_app_name(target)
+    if not app_name:
+        return []
+    commands, desktop_files = MAC_APP_LAUNCHERS.get(app_name, ((), ()))
+    for desktop_file in desktop_files:
+        if _desktop_file_exists(desktop_file):
+            gio = shutil.which("gio")
+            if gio:
+                return [gio, "launch", desktop_file]
+    command = _first_available_command(commands)
+    return list(command) if command else []
+
+
+def _mac_app_name(target: str) -> str:
+    path = target.strip().strip('"')
+    if not path.endswith(".app"):
+        return ""
+    name = Path(path).name.removesuffix(".app")
+    return name.strip()
+
+
+def _first_available_command(commands: tuple[str, ...]) -> tuple[str, ...]:
+    index = 0
+    while index < len(commands):
+        command = commands[index]
+        if shutil.which(command):
+            return tuple(commands[index:])
+        index += 1
+    return ()
+
+
+def _desktop_file_exists(name: str) -> bool:
+    for base in (Path.home() / ".local/share/applications", Path("/usr/share/applications")):
+        if (base / name).exists():
+            return True
+    return False
 
 
 def copy_text_action(config: ButtonConfig, copy_text: Callable[[str], None] | None = None) -> str:

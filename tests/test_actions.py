@@ -46,3 +46,24 @@ def test_text_action_can_split_press_and_release():
 
     assert paste_text_action(config, paste=lambda: calls.append(("paste", ""))) == "Pasted text."
     assert calls == [("copy", "expected target"), ("paste", "")]
+
+
+def test_file_action_translates_mac_app_to_linux_desktop_file(monkeypatch, tmp_path):
+    calls = []
+
+    monkeypatch.setattr("streamdeck_studio.actions.shutil.which", lambda command: "/usr/bin/gio" if command == "gio" else None)
+    monkeypatch.setattr("streamdeck_studio.actions._desktop_file_exists", lambda name: name == "org.gnome.Calculator.desktop")
+    monkeypatch.setattr("streamdeck_studio.actions.subprocess.Popen", lambda args, **kwargs: calls.append((args, kwargs)))
+
+    message = run_action(ButtonConfig(action_type="file", target="/System/Applications/Calculator.app"))
+
+    assert message == "Started: /usr/bin/gio launch org.gnome.Calculator.desktop"
+    assert calls == [(["/usr/bin/gio", "launch", "org.gnome.Calculator.desktop"], {"start_new_session": True})]
+
+
+def test_file_action_reports_unmapped_mac_app(monkeypatch):
+    monkeypatch.setattr("streamdeck_studio.actions.shutil.which", lambda _command: None)
+    monkeypatch.setattr("streamdeck_studio.actions._desktop_file_exists", lambda _name: False)
+
+    with pytest.raises(ActionError, match="No Linux launcher found"):
+        run_action(ButtonConfig(action_type="file", target="/System/Applications/FaceTime.app"))
