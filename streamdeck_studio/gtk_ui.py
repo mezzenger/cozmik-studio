@@ -70,6 +70,8 @@ class MainWindow(Adw.ApplicationWindow):
         self.key_buttons: list[KeyButton] = []
         self._updating_editor = False
         self._suppress_release: set[int] = set()
+        self._last_key_event = "No hardware key events yet."
+        self._last_action = "No action run yet."
 
         self._build_ui()
         self._connect_deck()
@@ -129,9 +131,12 @@ class MainWindow(Adw.ApplicationWindow):
         self.grid = Gtk.Grid(column_spacing=10, row_spacing=10)
         left.append(self.grid)
 
+        right = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        right.set_size_request(380, -1)
+        content.append(right)
+
         editor = Gtk.Frame(label="Button")
-        editor.set_size_request(360, -1)
-        content.append(editor)
+        right.append(editor)
         form = Gtk.Grid(column_spacing=10, row_spacing=10)
         form.set_margin_top(14)
         form.set_margin_bottom(14)
@@ -171,6 +176,25 @@ class MainWindow(Adw.ApplicationWindow):
         color_row.append(self.foreground_button)
         self._attach_row(form, 6, "Colors", color_row)
 
+        diagnostics = Gtk.Frame(label="Diagnostics")
+        right.append(diagnostics)
+        diagnostics_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        diagnostics_box.set_margin_top(12)
+        diagnostics_box.set_margin_bottom(12)
+        diagnostics_box.set_margin_start(12)
+        diagnostics_box.set_margin_end(12)
+        diagnostics.set_child(diagnostics_box)
+        self.diagnostics_view = Gtk.TextView()
+        self.diagnostics_view.set_editable(False)
+        self.diagnostics_view.set_cursor_visible(False)
+        self.diagnostics_view.set_monospace(True)
+        self.diagnostics_view.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+        self.diagnostics_view.set_size_request(-1, 220)
+        diagnostics_box.append(self.diagnostics_view)
+        refresh_diagnostics = Gtk.Button(label="Refresh Diagnostics")
+        refresh_diagnostics.connect("clicked", lambda *_args: self._refresh_diagnostics())
+        diagnostics_box.append(refresh_diagnostics)
+
         self.status_label = Gtk.Label(xalign=0)
         self.status_label.add_css_class("status-label")
         root.append(self.status_label)
@@ -185,6 +209,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._rebuild_grid()
         self._refresh_page_combo()
         self._select_button(0)
+        self._refresh_diagnostics()
 
     def _attach_row(self, form: Gtk.Grid, row: int, label: str, widget: Gtk.Widget) -> None:
         form.attach(Gtk.Label(label=label, xalign=0), 0, row, 1, 1)
@@ -238,6 +263,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._set_color(self.background_button, config.background)
         self._set_color(self.foreground_button, config.foreground)
         self._updating_editor = False
+        self._refresh_diagnostics()
 
     def _editor_changed(self) -> None:
         if not self.key_buttons or self._updating_editor:
@@ -322,17 +348,23 @@ class MainWindow(Adw.ApplicationWindow):
             self._log(f"release key={index} label={config.label!r} action={config.action_type} target={config.target!r}")
             if config.action_type == "text":
                 message = paste_text_action(config, paste=self._paste)
+                self._last_action = f"release key={index}: {message}"
                 self._set_status(message)
+                self._refresh_diagnostics()
                 return False
             if config.action_type == "page":
                 self._switch_to_page(config.target)
                 return False
             message = run_action(config, copy_text=self._copy_text, paste=self._paste)
+            self._last_action = f"release key={index}: {message}"
             self._set_status(message)
         except ActionError as exc:
+            self._last_action = f"release key={index}: {exc}"
             self._set_status(str(exc))
         except Exception as exc:
+            self._last_action = f"release key={index}: {exc}"
             self._set_status(f"Action failed: {exc}")
+        self._refresh_diagnostics()
         return False
 
     def _key_pressed(self, index: int) -> bool:
@@ -343,18 +375,25 @@ class MainWindow(Adw.ApplicationWindow):
             self._log(f"press key={index} label={config.label!r} action={config.action_type} target={config.target!r}")
             if config.action_type == "text":
                 message = copy_text_action(config, copy_text=self._copy_text)
+                self._last_action = f"press key={index}: {message}"
                 self._set_status(message)
             elif config.action_type == "page":
                 self._suppress_release.add(index)
+                self._last_action = f"press key={index}: switching page"
                 self._switch_to_page(config.target)
         except ActionError as exc:
+            self._last_action = f"press key={index}: {exc}"
             self._set_status(str(exc))
         except Exception as exc:
+            self._last_action = f"press key={index}: {exc}"
             self._set_status(f"Action failed: {exc}")
+        self._refresh_diagnostics()
         return False
 
     def _log_key_event(self, index: int, pressed: bool) -> bool:
+        self._last_key_event = f"key={index} state={'pressed' if pressed else 'released'}"
         self._log(f"raw key={index} state={'pressed' if pressed else 'released'}")
+        self._refresh_diagnostics()
         return False
 
     def _save_now(self) -> None:
@@ -458,6 +497,30 @@ class MainWindow(Adw.ApplicationWindow):
         self.deck.apply_profile(self.profile)
         self._save_profile(silent=True)
         self._set_status(f"Page: {self.profile.page_names.get(page_id, page_id)}")
+        self._refresh_diagnostics()
+
+    def _refresh_diagnostics(self) -> None:
+        if not hasattr(self, "diagnostics_view"):
+            return
+        page_id = self.profile.current_page
+        page_name = self.profile.page_names.get(page_id, page_id)
+        config = self.profile.get_button(self.selected_index)
+        helpers = ", ".join(_helper_status())
+        lines = [
+            f"Device: {self.device_label.get_text() if hasattr(self, 'device_label') else 'Unknown'}",
+            f"Profile: {self.profile.name}",
+            f"Layout: {self.profile.rows} x {self.profile.columns} ({self.profile.button_count()} buttons)",
+            f"Page: {page_name}",
+            f"Page ID: {page_id}",
+            f"Selected: {self.selected_index} (row {self.selected_index // self.profile.columns}, column {self.selected_index % self.profile.columns})",
+            f"Label: {config.label or '-'}",
+            f"Action: {config.action_type}",
+            f"Target: {config.target or '-'}",
+            f"Last key: {self._last_key_event}",
+            f"Last action: {self._last_action}",
+            f"Helpers: {helpers}",
+        ]
+        self.diagnostics_view.get_buffer().set_text("\n".join(lines))
 
     def _log(self, message: str) -> None:
         try:
@@ -581,6 +644,15 @@ def _copy_text_with_cli(text: str) -> bool:
         subprocess.run([executable, *command[1:]], input=text, text=True, check=True)
         return True
     return False
+
+
+def _helper_status() -> list[str]:
+    helpers = []
+    for name in ("wl-copy", "ydotool", "wtype", "xdotool", "xdg-open", "gio"):
+        helpers.append(f"{name}={'yes' if shutil.which(name) else 'no'}")
+    socket = Path(f"/run/user/{os.getuid()}/.ydotool_socket")
+    helpers.append(f"ydotool_socket={'yes' if socket.exists() else 'no'}")
+    return helpers
 
 
 def run() -> int:
