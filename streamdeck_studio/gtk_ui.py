@@ -109,7 +109,7 @@ class MainWindow(Adw.ApplicationWindow):
         left.set_hexpand(True)
         content.append(left)
 
-        self.device_label = Gtk.Label(label="No Stream Deck connected", xalign=0)
+        self.device_label = Gtk.Label(label="Offline editor", xalign=0)
         self.device_label.add_css_class("device-label")
         self.page_combo = Gtk.ComboBoxText()
         self.page_combo.set_hexpand(True)
@@ -283,13 +283,13 @@ class MainWindow(Adw.ApplicationWindow):
         if info.connected:
             if self.profile.button_count() != info.key_count:
                 self.profile.set_layout(info.rows, info.columns)
-            self.device_label.set_text(f"{info.name} - {info.rows} x {info.columns}")
+            self.device_label.set_text("Connected")
             self.profile.page_ids()
             self._rebuild_grid()
             self.deck.apply_profile(self.profile)
             self._save_profile(silent=True)
         else:
-            self.device_label.set_text(f"Offline editor - {self.profile.rows} x {self.profile.columns}")
+            self.device_label.set_text("Offline editor")
             if info.error:
                 self._set_status(info.error)
         self._select_button(min(self.selected_index, self.profile.button_count() - 1))
