@@ -77,6 +77,8 @@ class MainWindow(Adw.ApplicationWindow):
         self._last_action = "No action run yet."
         self._last_import_report = "No import report yet."
         self._undo_stack: list[dict[str, Any]] = []
+        self.diagnostics_window = None
+        self.diagnostics_view = None
 
         self._build_ui()
         self._connect_deck()
@@ -169,25 +171,6 @@ class MainWindow(Adw.ApplicationWindow):
         self._attach_row(form, 7, "Background Image", self._image_row(self.background_image_entry, "background"))
         self._attach_row(form, 8, "Action Image", self._image_row(self.action_image_entry, "action"))
 
-        diagnostics = Gtk.Frame(label="Diagnostics")
-        right.append(diagnostics)
-        diagnostics_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        diagnostics_box.set_margin_top(12)
-        diagnostics_box.set_margin_bottom(12)
-        diagnostics_box.set_margin_start(12)
-        diagnostics_box.set_margin_end(12)
-        diagnostics.set_child(diagnostics_box)
-        self.diagnostics_view = Gtk.TextView()
-        self.diagnostics_view.set_editable(False)
-        self.diagnostics_view.set_cursor_visible(False)
-        self.diagnostics_view.set_monospace(True)
-        self.diagnostics_view.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
-        self.diagnostics_view.set_size_request(-1, 220)
-        diagnostics_box.append(self.diagnostics_view)
-        refresh_diagnostics = Gtk.Button(label="Refresh Diagnostics")
-        refresh_diagnostics.connect("clicked", lambda *_args: self._refresh_diagnostics())
-        diagnostics_box.append(refresh_diagnostics)
-
         self.status_label = Gtk.Label(xalign=0)
         self.status_label.add_css_class("status-label")
         root.append(self.status_label)
@@ -240,6 +223,7 @@ class MainWindow(Adw.ApplicationWindow):
         file_group = self._toolbar_group()
         file_group.append(self._text_button("Import", self._import_profile))
         file_group.append(self._text_button("Export", self._export_profile))
+        file_group.append(self._icon_button("dialog-information-symbolic", "Diagnostics", self._show_diagnostics))
         bar.append(file_group)
         return bar
 
@@ -595,6 +579,49 @@ class MainWindow(Adw.ApplicationWindow):
                     self._set_status(f"Export failed: {exc}")
         dialog.destroy()
 
+    def _show_diagnostics(self) -> None:
+        if self.diagnostics_window:
+            self._refresh_diagnostics()
+            self.diagnostics_window.present()
+            return
+        window = Gtk.Window(title="Diagnostics", transient_for=self)
+        window.set_default_size(620, 520)
+        window.connect("close-request", self._diagnostics_closed)
+        root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        root.set_margin_top(12)
+        root.set_margin_bottom(12)
+        root.set_margin_start(12)
+        root.set_margin_end(12)
+        window.set_child(root)
+
+        self.diagnostics_view = Gtk.TextView()
+        self.diagnostics_view.set_editable(False)
+        self.diagnostics_view.set_cursor_visible(False)
+        self.diagnostics_view.set_monospace(True)
+        self.diagnostics_view.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+        scrolled = Gtk.ScrolledWindow()
+        scrolled.set_vexpand(True)
+        scrolled.set_child(self.diagnostics_view)
+        root.append(scrolled)
+
+        buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        refresh = Gtk.Button(label="Refresh")
+        refresh.connect("clicked", lambda *_args: self._refresh_diagnostics())
+        close = Gtk.Button(label="Close")
+        close.connect("clicked", lambda *_args: window.close())
+        buttons.append(refresh)
+        buttons.append(close)
+        root.append(buttons)
+
+        self.diagnostics_window = window
+        self._refresh_diagnostics()
+        window.present()
+
+    def _diagnostics_closed(self, *_args) -> bool:
+        self.diagnostics_window = None
+        self.diagnostics_view = None
+        return False
+
     def _load_profile(self) -> Profile:
         try:
             return load_profile()
@@ -680,7 +707,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._refresh_diagnostics()
 
     def _refresh_diagnostics(self) -> None:
-        if not hasattr(self, "diagnostics_view"):
+        if not self.diagnostics_view:
             return
         page_id = self.profile.current_page
         page_name = self.profile.page_names.get(page_id, page_id)
