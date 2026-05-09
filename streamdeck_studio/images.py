@@ -13,22 +13,19 @@ class DeckImageTarget(Protocol):
     def key_image_format(self): ...
 
 
-def render_button_image(config: ButtonConfig, size: tuple[int, int] = (144, 144)) -> Image.Image:
+def render_button_image(config: ButtonConfig, size: tuple[int, int] = (144, 144), frame_index: int = 0) -> Image.Image:
     if config.image_path and not config.background_image_path and not config.action_image_path:
         path = Path(config.image_path).expanduser()
         if path.exists():
             try:
-                image = Image.open(path).convert("RGB")
+                image = _image_frame(path, frame_index).convert("RGB")
                 return _fit_image(image, size)
             except OSError:
                 pass
 
     width, height = size
-    image = _background_image(config, size)
+    image = _background_image(config, size, frame_index)
     draw = ImageDraw.Draw(image)
-
-    accent = _valid_color(_accent_for_action(config.action_type), "#14b8a6")
-    draw.rectangle((0, 0, width, 8), fill=accent)
 
     title = config.label.strip() or _default_label(config.action_type)
     subtitle = config.subtitle.strip()
@@ -42,7 +39,7 @@ def render_button_image(config: ButtonConfig, size: tuple[int, int] = (144, 144)
     icon_path = config.action_image_path or (config.image_path if config.background_image_path else "")
     icon_height = 0
     if icon_path:
-        icon_height = _draw_action_icon(image, icon_path, size, bool(title or subtitle))
+        icon_height = _draw_action_icon(image, icon_path, size, bool(title or subtitle), frame_index)
 
     title_lines = _wrap_text(title, title_font, width - 18, max_lines=3)
     line_heights = [_text_size(line, title_font)[1] for line in title_lines]
@@ -63,12 +60,21 @@ def render_button_image(config: ButtonConfig, size: tuple[int, int] = (144, 144)
     return image
 
 
-def _background_image(config: ButtonConfig, size: tuple[int, int]) -> Image.Image:
+def button_animation_frame_count(config: ButtonConfig) -> int:
+    return max((_frame_count(path) for path in _image_paths(config)), default=1)
+
+
+def button_animation_frame_duration(config: ButtonConfig, frame_index: int) -> float:
+    durations = [_frame_duration(path, frame_index) for path in _image_paths(config) if _frame_count(path) > 1]
+    return max(0.03, min(durations, default=0.1))
+
+
+def _background_image(config: ButtonConfig, size: tuple[int, int], frame_index: int) -> Image.Image:
     if config.background_image_path:
         path = Path(config.background_image_path).expanduser()
         if path.exists():
             try:
-                image = Image.open(path).convert("RGB")
+                image = _image_frame(path, frame_index).convert("RGB")
                 image = _cover_image(image, size)
                 overlay = Image.new("RGBA", size, (0, 0, 0, 72))
                 image = Image.alpha_composite(image.convert("RGBA"), overlay).convert("RGB")
@@ -78,12 +84,12 @@ def _background_image(config: ButtonConfig, size: tuple[int, int]) -> Image.Imag
     return Image.new("RGB", size, _valid_color(config.background, "#1f2937"))
 
 
-def _draw_action_icon(image: Image.Image, path_value: str, size: tuple[int, int], has_text: bool) -> int:
+def _draw_action_icon(image: Image.Image, path_value: str, size: tuple[int, int], has_text: bool, frame_index: int) -> int:
     path = Path(path_value).expanduser()
     if not path.exists():
         return 0
     try:
-        icon = Image.open(path).convert("RGBA")
+        icon = _image_frame(path, frame_index).convert("RGBA")
     except OSError:
         return 0
     max_size = int(min(size) * (0.42 if has_text else 0.62))
@@ -228,3 +234,48 @@ def _cover_image(image: Image.Image, size: tuple[int, int]) -> Image.Image:
     left = (new_width - size[0]) // 2
     top = (new_height - size[1]) // 2
     return resized.crop((left, top, left + size[0], top + size[1]))
+
+
+def _image_paths(config: ButtonConfig) -> list[str]:
+    paths = []
+    if config.image_path:
+        paths.append(config.image_path)
+    if config.background_image_path:
+        paths.append(config.background_image_path)
+    if config.action_image_path:
+        paths.append(config.action_image_path)
+    return paths
+
+
+def _image_frame(path: Path, frame_index: int) -> Image.Image:
+    image = Image.open(path)
+    count = getattr(image, "n_frames", 1)
+    if count > 1:
+        image.seek(frame_index % count)
+    return image.copy()
+
+
+def _frame_count(path_value: str) -> int:
+    path = Path(path_value).expanduser()
+    if not path.exists():
+        return 1
+    try:
+        with Image.open(path) as image:
+            return max(1, getattr(image, "n_frames", 1))
+    except OSError:
+        return 1
+
+
+def _frame_duration(path_value: str, frame_index: int) -> float:
+    path = Path(path_value).expanduser()
+    if not path.exists():
+        return 0.1
+    try:
+        with Image.open(path) as image:
+            count = max(1, getattr(image, "n_frames", 1))
+            if count > 1:
+                image.seek(frame_index % count)
+            duration_ms = int(image.info.get("duration", 100))
+    except OSError:
+        return 0.1
+    return max(30, duration_ms) / 1000

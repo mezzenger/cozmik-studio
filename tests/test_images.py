@@ -1,10 +1,17 @@
-from streamdeck_studio.images import render_button_image
+from PIL import Image
+
+from streamdeck_studio.images import button_animation_frame_count, button_animation_frame_duration, render_button_image
 from streamdeck_studio.model import ButtonConfig
 
 
 def test_render_button_image_size():
     image = render_button_image(ButtonConfig(label="Terminal", action_type="command"), (144, 144))
     assert image.size == (144, 144)
+
+
+def test_render_button_has_no_top_action_bar():
+    image = render_button_image(ButtonConfig(background="#123456"), (144, 144))
+    assert image.getpixel((4, 4)) == (18, 52, 86)
 
 
 def test_render_button_uses_background_and_action_images(tmp_path):
@@ -25,3 +32,21 @@ def test_render_button_uses_background_and_action_images(tmp_path):
 
     assert image.size == (144, 144)
     assert image.getpixel((72, 36)) != image.getpixel((8, 136))
+
+
+def test_render_button_uses_animated_gif_frames(tmp_path):
+    gif_path = tmp_path / "action.gif"
+    frames = [
+        Image.new("RGB", (48, 48), "#ff0000"),
+        Image.new("RGB", (48, 48), "#00ff00"),
+    ]
+    frames[0].save(gif_path, save_all=True, append_images=[frames[1]], duration=[80, 120], loop=0)
+    config = ButtonConfig(action_image_path=str(gif_path), background="#000000")
+
+    first = render_button_image(config, (144, 144), frame_index=0)
+    second = render_button_image(config, (144, 144), frame_index=1)
+
+    assert button_animation_frame_count(config) == 2
+    assert button_animation_frame_duration(config, 0) == 0.08
+    assert button_animation_frame_duration(config, 1) == 0.12
+    assert first.getpixel((72, 36)) != second.getpixel((72, 36))
