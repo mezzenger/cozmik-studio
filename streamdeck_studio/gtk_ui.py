@@ -773,8 +773,8 @@ class MainWindow(Adw.ApplicationWindow):
         provider = Gtk.CssProvider()
         provider.load_from_data(
             b"""
-            .top-toolbar { padding: 10px 12px; background: #f8fafc; border-radius: 8px; }
-            .toolbar-group { padding: 4px; background: #ffffff; border-radius: 8px; }
+            .top-toolbar { padding: 10px 12px; background: #e2e8f0; border-radius: 8px; border: 1px solid #cbd5e1; }
+            .toolbar-group { padding: 4px; background: #f8fafc; border-radius: 8px; border: 1px solid #cbd5e1; }
             .toolbar-button { min-width: 36px; min-height: 32px; padding: 4px 10px; }
             .device-label { font-weight: 700; font-size: 15px; }
             .status-label { padding: 8px 16px; color: #475569; }
