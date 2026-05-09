@@ -76,3 +76,16 @@ def test_blank_subtitle_stays_blank(monkeypatch):
     render_button_image(ButtonConfig(label="Docs", action_type="url", subtitle=""), (144, 144))
 
     assert drawn == ["Docs"]
+
+
+def test_blank_title_and_subtitle_stay_blank(monkeypatch):
+    drawn = []
+
+    def record_text(_draw, text, _y, _width, _font, _fill):
+        drawn.append(text)
+
+    monkeypatch.setattr("streamdeck_studio.images._draw_centered_text", record_text)
+
+    render_button_image(ButtonConfig(label="", action_type="url", subtitle=""), (144, 144))
+
+    assert drawn == []

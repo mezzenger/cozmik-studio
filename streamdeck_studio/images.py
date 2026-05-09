@@ -28,7 +28,7 @@ def render_button_image(config: ButtonConfig, size: tuple[int, int] = (144, 144)
     draw = ImageDraw.Draw(image)
 
     icon_path = config.action_image_path or (config.image_path if config.background_image_path else "")
-    title = config.label.strip() or ("" if icon_path else _default_label(config.action_type))
+    title = config.label.strip()
     subtitle = config.subtitle.strip()
 
     foreground = _valid_color(config.foreground, "#ffffff")
@@ -39,7 +39,7 @@ def render_button_image(config: ButtonConfig, size: tuple[int, int] = (144, 144)
     if icon_path:
         icon_height = _draw_action_icon(image, icon_path, size, bool(title or subtitle), frame_index)
 
-    title_lines = _wrap_text(title, title_font, width - 18, max_lines=3)
+    title_lines = _wrap_text(title, title_font, width - 18, max_lines=3) if title else []
     line_heights = [_text_size(line, title_font)[1] for line in title_lines]
     total_title_height = sum(line_heights) + max(0, len(title_lines) - 1) * 4
     subtitle_height = _text_size(subtitle, subtitle_font)[1] if subtitle else 0
@@ -112,30 +112,6 @@ def _valid_color(value: str, fallback: str) -> str:
         return value
     except ValueError:
         return fallback
-
-
-def _accent_for_action(action_type: str) -> str:
-    return {
-        "none": "#64748b",
-        "command": "#22c55e",
-        "shell": "#10b981",
-        "url": "#38bdf8",
-        "file": "#f59e0b",
-        "text": "#a78bfa",
-        "page": "#64748b",
-    }.get(action_type, "#14b8a6")
-
-
-def _default_label(action_type: str) -> str:
-    return {
-        "none": "Empty",
-        "command": "Command",
-        "shell": "Shell",
-        "url": "Website",
-        "file": "Open",
-        "text": "Text",
-        "page": "Page",
-    }.get(action_type, "Button")
 
 
 @lru_cache(maxsize=64)

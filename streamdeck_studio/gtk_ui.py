@@ -338,7 +338,7 @@ class MainWindow(Adw.ApplicationWindow):
             return
         config = self.profile.get_button(index)
         pixbuf = _pixbuf_from_pil(render_button_image(config, (144, 144)))
-        self.key_buttons[index].set_preview(pixbuf, config.label or f"Button {index + 1}")
+        self.key_buttons[index].set_preview(pixbuf, config.label)
 
     def _browse_target(self) -> None:
         action_type = self.action_combo.get_active_text()
