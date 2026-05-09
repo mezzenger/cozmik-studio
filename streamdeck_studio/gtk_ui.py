@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from io import BytesIO
 from datetime import datetime
+from typing import Any
 import json
 import os
 from pathlib import Path
@@ -75,6 +76,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._last_key_event = "No hardware key events yet."
         self._last_action = "No action run yet."
         self._last_import_report = "No import report yet."
+        self._undo_stack: list[dict[str, Any]] = []
 
         self._build_ui()
         self._connect_deck()
@@ -93,20 +95,8 @@ class MainWindow(Adw.ApplicationWindow):
 
         header = Adw.HeaderBar()
         root.append(header)
-
-        for label, callback in (
-            ("Save", self._save_now),
-            ("Reconnect", self._connect_deck),
-            ("Previous", self._previous_page),
-            ("Next", self._next_page),
-            ("Run", self._run_selected),
-            ("Clear", self._clear_selected),
-            ("Import", self._import_profile),
-            ("Export", self._export_profile),
-        ):
-            button = Gtk.Button(label=label)
-            button.connect("clicked", lambda _button, cb=callback: cb())
-            header.pack_start(button) if label in {"Save", "Reconnect", "Previous", "Next"} else header.pack_end(button)
+        title = Adw.WindowTitle(title="Stream Deck Studio", subtitle="Button profiles and launchers")
+        header.set_title_widget(title)
 
         content = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=16)
         content.set_margin_top(16)
@@ -121,15 +111,10 @@ class MainWindow(Adw.ApplicationWindow):
 
         self.device_label = Gtk.Label(label="No Stream Deck connected", xalign=0)
         self.device_label.add_css_class("device-label")
-        left.append(self.device_label)
-
-        page_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        page_row.append(Gtk.Label(label="Page", xalign=0))
         self.page_combo = Gtk.ComboBoxText()
         self.page_combo.set_hexpand(True)
         self.page_combo.connect("changed", lambda *_args: self._page_changed())
-        page_row.append(self.page_combo)
-        left.append(page_row)
+        root.insert_child_after(self._top_toolbar(), header)
 
         self.grid = Gtk.Grid(column_spacing=10, row_spacing=10)
         left.append(self.grid)
@@ -221,6 +206,61 @@ class MainWindow(Adw.ApplicationWindow):
         self._select_button(0)
         self._refresh_diagnostics()
 
+    def _top_toolbar(self) -> Gtk.Box:
+        bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        bar.add_css_class("top-toolbar")
+        bar.set_margin_top(12)
+        bar.set_margin_start(16)
+        bar.set_margin_end(16)
+
+        status_group = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        status_group.set_hexpand(True)
+        status_group.append(self.device_label)
+        page_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        page_row.append(Gtk.Label(label="Page", xalign=0))
+        page_row.append(self.page_combo)
+        status_group.append(page_row)
+        bar.append(status_group)
+
+        nav_group = self._toolbar_group()
+        nav_group.append(self._icon_button("go-previous-symbolic", "Previous Page", self._previous_page))
+        nav_group.append(self._icon_button("go-next-symbolic", "Next Page", self._next_page))
+        nav_group.append(self._icon_button("view-refresh-symbolic", "Reconnect", self._connect_deck))
+        bar.append(nav_group)
+
+        edit_group = self._toolbar_group()
+        self.undo_button = self._icon_button("edit-undo-symbolic", "Undo", self._undo)
+        self.undo_button.set_sensitive(False)
+        edit_group.append(self.undo_button)
+        edit_group.append(self._icon_button("media-playback-start-symbolic", "Run", self._run_selected))
+        edit_group.append(self._icon_button("edit-clear-symbolic", "Clear", self._clear_selected))
+        edit_group.append(self._icon_button("document-save-symbolic", "Save", self._save_now))
+        bar.append(edit_group)
+
+        file_group = self._toolbar_group()
+        file_group.append(self._text_button("Import", self._import_profile))
+        file_group.append(self._text_button("Export", self._export_profile))
+        bar.append(file_group)
+        return bar
+
+    def _toolbar_group(self) -> Gtk.Box:
+        group = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        group.add_css_class("toolbar-group")
+        return group
+
+    def _icon_button(self, icon_name: str, tooltip: str, callback) -> Gtk.Button:
+        button = Gtk.Button(icon_name=icon_name)
+        button.add_css_class("toolbar-button")
+        button.set_tooltip_text(tooltip)
+        button.connect("clicked", lambda *_args: callback())
+        return button
+
+    def _text_button(self, label: str, callback) -> Gtk.Button:
+        button = Gtk.Button(label=label)
+        button.add_css_class("toolbar-button")
+        button.connect("clicked", lambda *_args: callback())
+        return button
+
     def _attach_row(self, form: Gtk.Grid, row: int, label: str, widget: Gtk.Widget) -> None:
         form.attach(Gtk.Label(label=label, xalign=0), 0, row, 1, 1)
         widget.set_hexpand(True)
@@ -292,6 +332,7 @@ class MainWindow(Adw.ApplicationWindow):
     def _editor_changed(self) -> None:
         if not self.key_buttons or self._updating_editor:
             return
+        self._push_undo()
         config = self.profile.get_button(self.selected_index)
         config.label = self.label_entry.get_text()
         config.subtitle = self.subtitle_entry.get_text()
@@ -503,6 +544,7 @@ class MainWindow(Adw.ApplicationWindow):
             self._set_status("Profile saved and applied.")
 
     def _clear_selected(self) -> None:
+        self._push_undo()
         self.profile.clear_button(self.selected_index)
         self._select_button(self.selected_index)
         self._refresh_preview(self.selected_index)
@@ -520,6 +562,7 @@ class MainWindow(Adw.ApplicationWindow):
             file = dialog.get_file()
             if file and file.get_path():
                 try:
+                    self._push_undo()
                     self.profile = import_profile(Path(file.get_path()))
                     self._refresh_page_combo()
                     self._rebuild_grid()
@@ -558,6 +601,38 @@ class MainWindow(Adw.ApplicationWindow):
         except (OSError, json.JSONDecodeError, ValueError) as exc:
             self.startup_message = f"Could not load saved profile: {exc}"
             return Profile()
+
+    def _push_undo(self) -> None:
+        snapshot = self.profile.to_dict()
+        if self._undo_stack and self._undo_stack[-1] == snapshot:
+            return
+        self._undo_stack.append(snapshot)
+        if len(self._undo_stack) > 100:
+            self._undo_stack.pop(0)
+        self._update_undo_state()
+
+    def _undo(self) -> None:
+        if not self._undo_stack:
+            self._set_status("Nothing to undo.")
+            return
+        try:
+            self.profile = Profile.from_dict(self._undo_stack.pop())
+        except (TypeError, ValueError) as exc:
+            self._set_status(f"Undo failed: {exc}")
+            self._update_undo_state()
+            return
+        self._refresh_page_combo()
+        self._rebuild_grid()
+        self._select_button(min(self.selected_index, self.profile.button_count() - 1))
+        self.deck.apply_profile(self.profile)
+        self._save_profile(silent=True)
+        self._update_undo_state()
+        self._set_status("Undid last change.")
+        self._refresh_diagnostics()
+
+    def _update_undo_state(self) -> None:
+        if hasattr(self, "undo_button"):
+            self.undo_button.set_sensitive(bool(self._undo_stack))
 
     def _save_profile(self, silent: bool) -> bool:
         try:
@@ -698,7 +773,10 @@ class MainWindow(Adw.ApplicationWindow):
         provider = Gtk.CssProvider()
         provider.load_from_data(
             b"""
-            .device-label { font-weight: 700; font-size: 16px; }
+            .top-toolbar { padding: 10px 12px; background: #f8fafc; border-radius: 8px; }
+            .toolbar-group { padding: 4px; background: #ffffff; border-radius: 8px; }
+            .toolbar-button { min-width: 36px; min-height: 32px; padding: 4px 10px; }
+            .device-label { font-weight: 700; font-size: 15px; }
             .status-label { padding: 8px 16px; color: #475569; }
             .key-button { border-radius: 8px; padding: 0; }
             .key-button.selected { border: 2px solid #0f766e; background: #ecfdf5; }
