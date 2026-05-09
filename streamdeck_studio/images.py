@@ -14,7 +14,7 @@ class DeckImageTarget(Protocol):
 
 
 def render_button_image(config: ButtonConfig, size: tuple[int, int] = (144, 144)) -> Image.Image:
-    if config.image_path:
+    if config.image_path and not config.background_image_path and not config.action_image_path:
         path = Path(config.image_path).expanduser()
         if path.exists():
             try:
@@ -23,9 +23,9 @@ def render_button_image(config: ButtonConfig, size: tuple[int, int] = (144, 144)
             except OSError:
                 pass
 
-    image = Image.new("RGB", size, _valid_color(config.background, "#1f2937"))
-    draw = ImageDraw.Draw(image)
     width, height = size
+    image = _background_image(config, size)
+    draw = ImageDraw.Draw(image)
 
     accent = _valid_color(_accent_for_action(config.action_type), "#14b8a6")
     draw.rectangle((0, 0, width, 8), fill=accent)
@@ -39,12 +39,17 @@ def render_button_image(config: ButtonConfig, size: tuple[int, int] = (144, 144)
     title_font = _fit_font(title, width - 18, max_size=28, min_size=12, bold=True)
     subtitle_font = _font(13, bold=False)
 
+    icon_path = config.action_image_path or (config.image_path if config.background_image_path else "")
+    icon_height = 0
+    if icon_path:
+        icon_height = _draw_action_icon(image, icon_path, size, bool(title or subtitle))
+
     title_lines = _wrap_text(title, title_font, width - 18, max_lines=3)
     line_heights = [_text_size(line, title_font)[1] for line in title_lines]
     total_title_height = sum(line_heights) + max(0, len(title_lines) - 1) * 4
     subtitle_height = _text_size(subtitle, subtitle_font)[1] if subtitle else 0
     total_height = total_title_height + (12 + subtitle_height if subtitle else 0)
-    y = max(18, (height - total_height) // 2)
+    y = max(18 + icon_height, (height - total_height + icon_height) // 2)
 
     for line, line_height in zip(title_lines, line_heights):
         _draw_centered_text(draw, line, y, width, title_font, foreground)
@@ -56,6 +61,39 @@ def render_button_image(config: ButtonConfig, size: tuple[int, int] = (144, 144)
         _draw_centered_text(draw, subtitle, y, width, subtitle_font, "#d1d5db")
 
     return image
+
+
+def _background_image(config: ButtonConfig, size: tuple[int, int]) -> Image.Image:
+    if config.background_image_path:
+        path = Path(config.background_image_path).expanduser()
+        if path.exists():
+            try:
+                image = Image.open(path).convert("RGB")
+                image = _cover_image(image, size)
+                overlay = Image.new("RGBA", size, (0, 0, 0, 72))
+                image = Image.alpha_composite(image.convert("RGBA"), overlay).convert("RGB")
+                return image
+            except OSError:
+                pass
+    return Image.new("RGB", size, _valid_color(config.background, "#1f2937"))
+
+
+def _draw_action_icon(image: Image.Image, path_value: str, size: tuple[int, int], has_text: bool) -> int:
+    path = Path(path_value).expanduser()
+    if not path.exists():
+        return 0
+    try:
+        icon = Image.open(path).convert("RGBA")
+    except OSError:
+        return 0
+    max_size = int(min(size) * (0.42 if has_text else 0.62))
+    icon.thumbnail((max_size, max_size), Image.LANCZOS)
+    x = (size[0] - icon.width) // 2
+    y = 24 if has_text else (size[1] - icon.height) // 2
+    base = image.convert("RGBA")
+    base.alpha_composite(icon, (x, y))
+    image.paste(base.convert("RGB"))
+    return icon.height + 18 if has_text else 0
 
 
 def to_streamdeck_native(deck: DeckImageTarget, image: Image.Image) -> bytes:
@@ -175,3 +213,18 @@ def _fit_image(image: Image.Image, size: tuple[int, int]) -> Image.Image:
     y = (size[1] - thumbnail.height) // 2
     output.paste(thumbnail, (x, y))
     return output
+
+
+def _cover_image(image: Image.Image, size: tuple[int, int]) -> Image.Image:
+    image_ratio = image.width / image.height
+    target_ratio = size[0] / size[1]
+    if image_ratio > target_ratio:
+        new_height = size[1]
+        new_width = round(new_height * image_ratio)
+    else:
+        new_width = size[0]
+        new_height = round(new_width / image_ratio)
+    resized = image.resize((new_width, new_height), Image.LANCZOS)
+    left = (new_width - size[0]) // 2
+    top = (new_height - size[1]) // 2
+    return resized.crop((left, top, left + size[0], top + size[1]))

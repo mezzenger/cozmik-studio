@@ -19,6 +19,8 @@ class ButtonConfig:
     background: str = "#1f2937"
     foreground: str = "#ffffff"
     image_path: str = ""
+    background_image_path: str = ""
+    action_image_path: str = ""
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ButtonConfig":
@@ -33,6 +35,8 @@ class ButtonConfig:
             background=str(data.get("background", "#1f2937")),
             foreground=str(data.get("foreground", "#ffffff")),
             image_path=str(data.get("image_path", "")),
+            background_image_path=str(data.get("background_image_path", "")),
+            action_image_path=str(data.get("action_image_path", "")),
         )
 
 

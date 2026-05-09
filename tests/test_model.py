@@ -7,6 +7,8 @@ def test_profile_round_trip(tmp_path):
     profile.get_button(1).label = "Terminal"
     profile.get_button(1).action_type = "command"
     profile.get_button(1).target = "kitty"
+    profile.get_button(1).background_image_path = "/tmp/background.png"
+    profile.get_button(1).action_image_path = "/tmp/action.png"
 
     save_profile(profile, path)
     loaded = load_profile(path)
@@ -16,3 +18,5 @@ def test_profile_round_trip(tmp_path):
     assert loaded.columns == 3
     assert loaded.get_button(1).label == "Terminal"
     assert loaded.get_button(1).target == "kitty"
+    assert loaded.get_button(1).background_image_path == "/tmp/background.png"
+    assert loaded.get_button(1).action_image_path == "/tmp/action.png"

@@ -108,7 +108,7 @@ def _button_issues(profile: Profile, page_name: str, index: int, config: ButtonC
         elif not Path(target).expanduser().exists():
             issues.append(_issue(page_name, index, config, "file target does not exist on this computer"))
 
-    if config.action_type == "none" and (config.label or config.subtitle or config.image_path):
+    if config.action_type == "none" and (config.label or config.subtitle or config.image_path or config.background_image_path or config.action_image_path):
         issues.append(_issue(page_name, index, config, "imported button has no supported action yet"))
     return issues
 
@@ -118,7 +118,17 @@ def _issue(page_name: str, index: int, config: ButtonConfig, message: str) -> Di
 
 
 def _is_configured(config: ButtonConfig) -> bool:
-    return any((config.label, config.subtitle, config.target, config.image_path, config.action_type != "none"))
+    return any(
+        (
+            config.label,
+            config.subtitle,
+            config.target,
+            config.image_path,
+            config.background_image_path,
+            config.action_image_path,
+            config.action_type != "none",
+        )
+    )
 
 
 def _safe_index(raw_index: str) -> int:

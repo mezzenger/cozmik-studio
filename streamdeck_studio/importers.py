@@ -364,7 +364,7 @@ def _button_from_action(action: dict[str, Any], manifest_dir: Path | None = None
         known = _known_hotkey_action(label)
         if known:
             action_type, target, subtitle = known
-    return ButtonConfig(label=label, action_type=action_type, target=target, subtitle=subtitle, image_path=image_path)
+    return ButtonConfig(label=label, action_type=action_type, target=target, subtitle=subtitle, action_image_path=image_path)
 
 
 def _infer_action_type(uuid: str, settings: dict[str, Any], target: str) -> str:

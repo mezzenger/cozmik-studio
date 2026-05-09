@@ -157,6 +157,8 @@ class MainWindow(Adw.ApplicationWindow):
         self.target_view.set_size_request(-1, 110)
         self.background_button = Gtk.ColorButton()
         self.foreground_button = Gtk.ColorButton()
+        self.background_image_entry = Gtk.Entry()
+        self.action_image_entry = Gtk.Entry()
 
         self._attach_row(form, 0, "Number", self.index_label)
         self._attach_row(form, 1, "Label", self.label_entry)
@@ -177,6 +179,9 @@ class MainWindow(Adw.ApplicationWindow):
         color_row.append(self.background_button)
         color_row.append(self.foreground_button)
         self._attach_row(form, 6, "Colors", color_row)
+
+        self._attach_row(form, 7, "Background Image", self._image_row(self.background_image_entry, "background"))
+        self._attach_row(form, 8, "Action Image", self._image_row(self.action_image_entry, "action"))
 
         diagnostics = Gtk.Frame(label="Diagnostics")
         right.append(diagnostics)
@@ -207,6 +212,8 @@ class MainWindow(Adw.ApplicationWindow):
         self.target_view.get_buffer().connect("changed", lambda *_args: self._editor_changed())
         self.background_button.connect("color-set", lambda *_args: self._color_changed())
         self.foreground_button.connect("color-set", lambda *_args: self._color_changed())
+        self.background_image_entry.connect("changed", lambda *_args: self._editor_changed())
+        self.action_image_entry.connect("changed", lambda *_args: self._editor_changed())
 
         self._rebuild_grid()
         self._refresh_page_combo()
@@ -217,6 +224,18 @@ class MainWindow(Adw.ApplicationWindow):
         form.attach(Gtk.Label(label=label, xalign=0), 0, row, 1, 1)
         widget.set_hexpand(True)
         form.attach(widget, 1, row, 1, 1)
+
+    def _image_row(self, entry: Gtk.Entry, image_kind: str) -> Gtk.Box:
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        entry.set_hexpand(True)
+        row.append(entry)
+        choose = Gtk.Button(label="Choose")
+        choose.connect("clicked", lambda *_args, kind=image_kind: self._choose_button_image(kind))
+        clear = Gtk.Button(label="Clear")
+        clear.connect("clicked", lambda *_args, target=entry: target.set_text(""))
+        row.append(choose)
+        row.append(clear)
+        return row
 
     def _connect_deck(self) -> None:
         info = self.deck.connect_first()
@@ -264,6 +283,8 @@ class MainWindow(Adw.ApplicationWindow):
         self._set_text_view(config.target)
         self._set_color(self.background_button, config.background)
         self._set_color(self.foreground_button, config.foreground)
+        self.background_image_entry.set_text(config.background_image_path)
+        self.action_image_entry.set_text(config.action_image_path)
         self._updating_editor = False
         self._refresh_diagnostics()
 
@@ -277,6 +298,8 @@ class MainWindow(Adw.ApplicationWindow):
         config.target = self._get_text_view()
         config.background = _rgba_to_hex(self.background_button.get_rgba())
         config.foreground = _rgba_to_hex(self.foreground_button.get_rgba())
+        config.background_image_path = self.background_image_entry.get_text().strip()
+        config.action_image_path = self.action_image_entry.get_text().strip()
         self._refresh_preview(self.selected_index)
         self.deck.apply_button(self.profile, self.selected_index)
         self._save_profile(silent=True)
@@ -333,6 +356,21 @@ class MainWindow(Adw.ApplicationWindow):
             file = dialog.get_file()
             if file and file.get_path():
                 self._set_text_view(file.get_path())
+        dialog.destroy()
+
+    def _choose_button_image(self, image_kind: str) -> None:
+        dialog = Gtk.FileChooserNative.new("Choose image", self, Gtk.FileChooserAction.OPEN, "Choose", "Cancel")
+        dialog.connect("response", lambda dlg, response, kind=image_kind: self._on_button_image_chosen(dlg, response, kind))
+        dialog.show()
+
+    def _on_button_image_chosen(self, dialog: Gtk.FileChooserNative, response: int, image_kind: str) -> None:
+        if response == Gtk.ResponseType.ACCEPT:
+            file = dialog.get_file()
+            if file and file.get_path():
+                if image_kind == "background":
+                    self.background_image_entry.set_text(file.get_path())
+                else:
+                    self.action_image_entry.set_text(file.get_path())
         dialog.destroy()
 
     def _run_selected(self) -> None:

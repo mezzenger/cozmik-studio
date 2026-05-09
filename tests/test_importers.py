@@ -198,3 +198,34 @@ def test_import_elgato_multimedia_and_known_hotkeys(tmp_path):
     assert profile.get_button(1).target == "gnome-screenshot -i"
     assert profile.get_button(2).action_type == "shortcut"
     assert profile.get_button(2).target == "ctrl+period"
+
+
+def test_import_elgato_state_image_as_action_image(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    path = tmp_path / "main.streamDeckProfile"
+    image_bytes = (
+        b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+        b"\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc\xf8\xcf\xc0"
+        b"\x00\x00\x03\x01\x01\x00\xc9\xfe\x92\xef\x00\x00\x00\x00IEND\xaeB`\x82"
+    )
+    payload = {
+        "Controllers": [
+            {
+                "Actions": {
+                    "0,0": {
+                        "UUID": "com.elgato.streamdeck.system.website",
+                        "States": [{"Title": "Docs", "Image": "Images/icon.png"}],
+                        "Settings": {"URL": "https://example.com"},
+                    }
+                }
+            }
+        ]
+    }
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr("manifest.json", json.dumps(payload))
+        archive.writestr("Images/icon.png", image_bytes)
+
+    profile = import_profile(path)
+
+    assert profile.get_button(0).image_path == ""
+    assert profile.get_button(0).action_image_path.endswith("icon.png")
