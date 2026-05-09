@@ -69,7 +69,7 @@ def action_icons() -> list[ActionIcon]:
     _ensure_builtin_icons(root / "built-in")
     _ensure_main_page_icons(root / "main")
     _ensure_app_icons(root / "apps")
-    return _collect_icons(root)
+    return [*_collect_resource_icons(), *_collect_icons(root)]
 
 
 def _ensure_builtin_icons(directory: Path) -> None:
@@ -125,9 +125,24 @@ def _collect_icons(root: Path) -> list[ActionIcon]:
     for directory in (root / "built-in", root / "main", root / "apps"):
         if not directory.exists():
             continue
-        for path in sorted(directory.glob("*.png")):
+        for path in _image_files(directory):
             icons.append(ActionIcon(name=_display_name(path.stem), path=path))
     return icons
+
+
+def _collect_resource_icons() -> list[ActionIcon]:
+    directory = Path(__file__).parent / "resources" / "action-images"
+    if not directory.exists():
+        return []
+    return [ActionIcon(name=_display_name(path.stem), path=path) for path in _image_files(directory)]
+
+
+def _image_files(directory: Path) -> list[Path]:
+    return sorted(
+        path
+        for path in directory.iterdir()
+        if path.is_file() and path.suffix.lower() in {".png", ".jpg", ".jpeg", ".gif"}
+    )
 
 
 def _draw_icon(path: Path, text: str, color: str) -> None:
@@ -235,7 +250,7 @@ def _safe_name(value: str) -> str:
 
 def _display_name(value: str) -> str:
     value = re.sub(r"^main-\d+-", "", value)
-    return value.replace("-", " ").title()
+    return value.replace("-", " ").replace("_", " ").title()
 
 
 def _font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:

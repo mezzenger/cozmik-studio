@@ -36,3 +36,14 @@ def test_action_icon_library_copies_main_page_icons(tmp_path, monkeypatch):
 
     assert main_icons
     assert all(icon.path.exists() for icon in main_icons)
+
+
+def test_action_icon_library_includes_bundled_gif_resource(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+
+    icons = action_icons()
+    umbrella = [icon for icon in icons if icon.name == "Umbrella 028"]
+
+    assert umbrella
+    assert umbrella[0].path.suffix == ".gif"
+    assert umbrella[0].path.exists()
