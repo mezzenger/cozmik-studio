@@ -34,6 +34,19 @@ def test_render_button_uses_background_and_action_images(tmp_path):
     assert image.getpixel((72, 36)) != image.getpixel((8, 136))
 
 
+def test_action_icon_fills_most_of_icon_only_button(tmp_path):
+    action_path = tmp_path / "action.png"
+    Image.new("RGBA", (96, 96), "#00ff00").save(action_path)
+
+    image = render_button_image(
+        ButtonConfig(label="", action_type="none", action_image_path=str(action_path), background="#000000"),
+        (144, 144),
+    )
+    green_pixels = sum(count for count, pixel in image.getcolors(maxcolors=144 * 144) if pixel == (0, 255, 0))
+
+    assert green_pixels > 12000
+
+
 def test_render_button_uses_animated_gif_frames(tmp_path):
     gif_path = tmp_path / "action.gif"
     frames = [

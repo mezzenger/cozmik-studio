@@ -27,14 +27,14 @@ def render_button_image(config: ButtonConfig, size: tuple[int, int] = (144, 144)
     image = _background_image(config, size, frame_index)
     draw = ImageDraw.Draw(image)
 
-    title = config.label.strip() or _default_label(config.action_type)
+    icon_path = config.action_image_path or (config.image_path if config.background_image_path else "")
+    title = config.label.strip() or ("" if icon_path else _default_label(config.action_type))
     subtitle = config.subtitle.strip()
 
     foreground = _valid_color(config.foreground, "#ffffff")
     title_font = _fit_font(title, width - 18, max_size=28, min_size=12, bold=True)
     subtitle_font = _font(13, bold=False)
 
-    icon_path = config.action_image_path or (config.image_path if config.background_image_path else "")
     icon_height = 0
     if icon_path:
         icon_height = _draw_action_icon(image, icon_path, size, bool(title or subtitle), frame_index)
@@ -90,14 +90,14 @@ def _draw_action_icon(image: Image.Image, path_value: str, size: tuple[int, int]
         icon = _image_frame(path, frame_index).convert("RGBA")
     except OSError:
         return 0
-    max_size = int(min(size) * (0.42 if has_text else 0.62))
-    icon.thumbnail((max_size, max_size), Image.LANCZOS)
+    max_size = int(min(size) * (0.68 if has_text else 0.92))
+    icon = _contain_image(icon, (max_size, max_size))
     x = (size[0] - icon.width) // 2
-    y = 24 if has_text else (size[1] - icon.height) // 2
+    y = 12 if has_text else (size[1] - icon.height) // 2
     base = image.convert("RGBA")
     base.alpha_composite(icon, (x, y))
     image.paste(base.convert("RGB"))
-    return icon.height + 18 if has_text else 0
+    return icon.height + 8 if has_text else 0
 
 
 def to_streamdeck_native(deck: DeckImageTarget, image: Image.Image) -> bytes:
@@ -232,6 +232,18 @@ def _cover_image(image: Image.Image, size: tuple[int, int]) -> Image.Image:
     left = (new_width - size[0]) // 2
     top = (new_height - size[1]) // 2
     return resized.crop((left, top, left + size[0], top + size[1]))
+
+
+def _contain_image(image: Image.Image, size: tuple[int, int]) -> Image.Image:
+    image_ratio = image.width / image.height
+    target_ratio = size[0] / size[1]
+    if image_ratio > target_ratio:
+        new_width = size[0]
+        new_height = round(new_width / image_ratio)
+    else:
+        new_height = size[1]
+        new_width = round(new_height * image_ratio)
+    return image.resize((new_width, new_height), Image.LANCZOS)
 
 
 def _image_paths(config: ButtonConfig) -> list[str]:
