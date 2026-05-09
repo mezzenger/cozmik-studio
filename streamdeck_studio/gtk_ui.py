@@ -773,10 +773,30 @@ class MainWindow(Adw.ApplicationWindow):
         provider = Gtk.CssProvider()
         provider.load_from_data(
             b"""
-            .top-toolbar { padding: 10px 12px; background: #e2e8f0; border-radius: 8px; border: 1px solid #cbd5e1; }
-            .toolbar-group { padding: 4px; background: #f8fafc; border-radius: 8px; border: 1px solid #cbd5e1; }
-            .toolbar-button { min-width: 36px; min-height: 32px; padding: 4px 10px; }
-            .device-label { font-weight: 700; font-size: 15px; }
+            .top-toolbar {
+                padding: 10px 12px;
+                background-color: #1e293b;
+                border-radius: 8px;
+                border: 1px solid #0f172a;
+            }
+            .toolbar-group {
+                padding: 4px;
+                background-color: #334155;
+                border-radius: 8px;
+                border: 1px solid #475569;
+            }
+            .toolbar-button {
+                min-width: 36px;
+                min-height: 32px;
+                padding: 4px 10px;
+                background-color: #f8fafc;
+                color: #0f172a;
+                border: 1px solid #94a3b8;
+                border-radius: 6px;
+            }
+            .toolbar-button:hover { background-color: #e2e8f0; }
+            .device-label { font-weight: 700; font-size: 15px; color: #f8fafc; }
+            .top-toolbar label { color: #f8fafc; }
             .status-label { padding: 8px 16px; color: #475569; }
             .key-button { border-radius: 8px; padding: 0; }
             .key-button.selected { border: 2px solid #0f766e; background: #ecfdf5; }
