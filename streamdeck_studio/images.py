@@ -29,8 +29,6 @@ def render_button_image(config: ButtonConfig, size: tuple[int, int] = (144, 144)
 
     title = config.label.strip() or _default_label(config.action_type)
     subtitle = config.subtitle.strip()
-    if not subtitle and config.action_type != "none":
-        subtitle = config.action_type.upper()
 
     foreground = _valid_color(config.foreground, "#ffffff")
     title_font = _fit_font(title, width - 18, max_size=28, min_size=12, bold=True)

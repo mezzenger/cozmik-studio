@@ -50,3 +50,16 @@ def test_render_button_uses_animated_gif_frames(tmp_path):
     assert button_animation_frame_duration(config, 0) == 0.08
     assert button_animation_frame_duration(config, 1) == 0.12
     assert first.getpixel((72, 36)) != second.getpixel((72, 36))
+
+
+def test_blank_subtitle_stays_blank(monkeypatch):
+    drawn = []
+
+    def record_text(_draw, text, _y, _width, _font, _fill):
+        drawn.append(text)
+
+    monkeypatch.setattr("streamdeck_studio.images._draw_centered_text", record_text)
+
+    render_button_image(ButtonConfig(label="Docs", action_type="url", subtitle=""), (144, 144))
+
+    assert drawn == ["Docs"]

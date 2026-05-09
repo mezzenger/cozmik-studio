@@ -18,6 +18,7 @@ gi.require_version("Gtk", "4.0")
 
 from gi.repository import Adw, Gdk, GdkPixbuf, Gio, GLib, Gtk
 
+from .action_icons import action_icons
 from .actions import ActionError, copy_text_action, paste_text_action, run_action
 from .deck import StreamDeckController
 from .diagnostics import profile_diagnostics, redact_target
@@ -359,9 +360,69 @@ class MainWindow(Adw.ApplicationWindow):
         dialog.destroy()
 
     def _choose_button_image(self, image_kind: str) -> None:
+        if image_kind == "action":
+            self._show_action_image_gallery()
+            return
+        self._choose_image_file(image_kind)
+
+    def _choose_image_file(self, image_kind: str) -> None:
         dialog = Gtk.FileChooserNative.new("Choose image", self, Gtk.FileChooserAction.OPEN, "Choose", "Cancel")
         dialog.connect("response", lambda dlg, response, kind=image_kind: self._on_button_image_chosen(dlg, response, kind))
         dialog.show()
+
+    def _show_action_image_gallery(self) -> None:
+        window = Gtk.Window(title="Choose Action Image", transient_for=self, modal=True)
+        window.set_default_size(620, 520)
+        root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        root.set_margin_top(12)
+        root.set_margin_bottom(12)
+        root.set_margin_start(12)
+        root.set_margin_end(12)
+        window.set_child(root)
+
+        toolbar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        browse = Gtk.Button(label="Browse File")
+        browse.connect("clicked", lambda *_args: (window.close(), self._choose_image_file("action")))
+        toolbar.append(browse)
+        clear = Gtk.Button(label="Clear")
+        clear.connect("clicked", lambda *_args: (self.action_image_entry.set_text(""), window.close()))
+        toolbar.append(clear)
+        root.append(toolbar)
+
+        scrolled = Gtk.ScrolledWindow()
+        scrolled.set_vexpand(True)
+        root.append(scrolled)
+        flow = Gtk.FlowBox()
+        flow.set_selection_mode(Gtk.SelectionMode.NONE)
+        flow.set_max_children_per_line(5)
+        flow.set_column_spacing(10)
+        flow.set_row_spacing(10)
+        scrolled.set_child(flow)
+
+        for option in action_icons():
+            button = Gtk.Button()
+            button.set_tooltip_text(option.name)
+            box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+            box.set_margin_top(8)
+            box.set_margin_bottom(8)
+            box.set_margin_start(8)
+            box.set_margin_end(8)
+            preview = Gtk.Image()
+            try:
+                pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_scale(str(option.path), 56, 56, True)
+                preview.set_from_pixbuf(pixbuf)
+            except GLib.Error:
+                preview.set_from_icon_name("image-missing-symbolic")
+            label = Gtk.Label(label=option.name)
+            label.set_max_width_chars(12)
+            label.set_ellipsize(3)
+            box.append(preview)
+            box.append(label)
+            button.set_child(box)
+            button.connect("clicked", lambda *_args, path=option.path: (self.action_image_entry.set_text(str(path)), window.close()))
+            flow.insert(button, -1)
+
+        window.present()
 
     def _on_button_image_chosen(self, dialog: Gtk.FileChooserNative, response: int, image_kind: str) -> None:
         if response == Gtk.ResponseType.ACCEPT:
