@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+import re
 import shutil
 import shlex
 import subprocess
@@ -20,7 +21,10 @@ MAC_APP_LAUNCHERS = {
     "Amazon Kindle": (("kindle",), ()),
     "Books": (("foliate", "gnome-books"), ()),
     "Calculator": (("gnome-calculator", "kcalc"), ("org.gnome.Calculator.desktop",)),
-    "Elgato Stream Deck": (("streamdeck-studio",), ("streamdeck-studio.desktop",)),
+    "Elgato Stream Deck": (
+        ("cozmik-studio", "streamdeck-studio"),
+        ("dev.local.CozmikStudio.desktop", "cozmik-studio.desktop", "streamdeck-studio.desktop"),
+    ),
     "FaceTime": ((), ()),
     "Google Chrome": (("google-chrome", "google-chrome-stable", "chromium", "firefox"), ("google-chrome.desktop", "chromium.desktop", "firefox.desktop")),
     "Joplin": (("joplin",), ("joplin.desktop", "net.cozic.joplin_desktop.desktop")),
@@ -44,9 +48,17 @@ COMMAND_ALIASES = {
 _YDOTOOL_KEYS = {
     "ctrl": 29,
     "control": 29,
+    "leftctrl": 29,
+    "rightctrl": 97,
     "alt": 56,
+    "leftalt": 56,
+    "rightalt": 100,
     "shift": 42,
+    "leftshift": 42,
+    "rightshift": 54,
     "super": 125,
+    "leftmeta": 125,
+    "rightmeta": 126,
     "cmd": 125,
     "meta": 125,
     "r": 19,
@@ -55,6 +67,111 @@ _YDOTOOL_KEYS = {
     "semicolon": 39,
     ";": 39,
     "print": 99,
+}
+
+_BUILTIN_EVDEV_KEY_CODES = {
+    "esc": 1,
+    "1": 2,
+    "2": 3,
+    "3": 4,
+    "4": 5,
+    "5": 6,
+    "6": 7,
+    "7": 8,
+    "8": 9,
+    "9": 10,
+    "0": 11,
+    "minus": 12,
+    "equal": 13,
+    "backspace": 14,
+    "tab": 15,
+    "q": 16,
+    "w": 17,
+    "e": 18,
+    "r": 19,
+    "t": 20,
+    "y": 21,
+    "u": 22,
+    "i": 23,
+    "o": 24,
+    "p": 25,
+    "leftbrace": 26,
+    "rightbrace": 27,
+    "enter": 28,
+    "leftctrl": 29,
+    "a": 30,
+    "s": 31,
+    "d": 32,
+    "f": 33,
+    "g": 34,
+    "h": 35,
+    "j": 36,
+    "k": 37,
+    "l": 38,
+    "semicolon": 39,
+    "apostrophe": 40,
+    "grave": 41,
+    "leftshift": 42,
+    "backslash": 43,
+    "z": 44,
+    "x": 45,
+    "c": 46,
+    "v": 47,
+    "b": 48,
+    "n": 49,
+    "m": 50,
+    "comma": 51,
+    "dot": 52,
+    "slash": 53,
+    "rightshift": 54,
+    "kpasterisk": 55,
+    "leftalt": 56,
+    "space": 57,
+    "capslock": 58,
+    "f1": 59,
+    "f2": 60,
+    "f3": 61,
+    "f4": 62,
+    "f5": 63,
+    "f6": 64,
+    "f7": 65,
+    "f8": 66,
+    "f9": 67,
+    "f10": 68,
+    "numlock": 69,
+    "scrolllock": 70,
+    "kp7": 71,
+    "kp8": 72,
+    "kp9": 73,
+    "kpminus": 74,
+    "kp4": 75,
+    "kp5": 76,
+    "kp6": 77,
+    "kpplus": 78,
+    "kp1": 79,
+    "kp2": 80,
+    "kp3": 81,
+    "kp0": 82,
+    "kpdot": 83,
+    "f11": 87,
+    "f12": 88,
+    "kpenter": 96,
+    "rightctrl": 97,
+    "kpslash": 98,
+    "sysrq": 99,
+    "rightalt": 100,
+    "home": 102,
+    "up": 103,
+    "pageup": 104,
+    "left": 105,
+    "right": 106,
+    "end": 107,
+    "down": 108,
+    "pagedown": 109,
+    "insert": 110,
+    "delete": 111,
+    "leftmeta": 125,
+    "rightmeta": 126,
 }
 
 _WTYPE_MODIFIERS = {
@@ -96,6 +213,8 @@ def run_action(config: ButtonConfig, copy_text: Callable[[str], None] | None = N
         return _run_media_action(target)
     if action_type == "shortcut":
         return _run_shortcut_action(target)
+    if action_type == "keys":
+        return _run_key_press_action(target, "key presses")
     if not target:
         raise ActionError("The selected button has no target.")
     if action_type == "command":
@@ -169,6 +288,15 @@ def _run_media_action(target: str) -> str:
     raise ActionError("No audio control helper found. Install wireplumber, pulseaudio-utils, or alsa-utils.")
 
 
+def _run_key_press_action(target: str, description: str) -> str:
+    steps = _parse_key_press_script(target)
+    if not steps:
+        raise ActionError(f"The selected {description} action has no target.")
+    if _send_key_press_steps_with_ydotool(steps) or _send_key_press_steps_with_xdotool(steps):
+        return f"Sent {description}: {target}"
+    raise ActionError("No keyboard helper found. Install ydotool or xdotool.")
+
+
 def _run_shortcut_action(target: str) -> str:
     keys = _parse_shortcut(target)
     if not keys:
@@ -182,13 +310,218 @@ def _parse_shortcut(target: str) -> list[str]:
     return [part.strip().lower() for part in target.replace(" ", "").split("+") if part.strip()]
 
 
+def _parse_key_press_script(target: str) -> list[tuple[str, list[str] | float]]:
+    steps: list[tuple[str, list[str] | float]] = []
+    for raw_group in target.split(","):
+        group = raw_group.strip()
+        if not group:
+            continue
+        keys: list[str] = []
+        held_keys: list[str] = []
+        for raw_token in group.split("+"):
+            token = raw_token.strip().lower()
+            if not token:
+                continue
+            delay = _parse_delay_token(token)
+            if delay is not None:
+                if keys:
+                    steps.append(("down", keys.copy()))
+                    held_keys.extend(keys)
+                    keys.clear()
+                steps.append(("delay", delay))
+                continue
+            keys.extend(_key_aliases(token))
+        if keys:
+            steps.append(("tap", keys))
+        if held_keys:
+            steps.append(("up", held_keys))
+    return steps
+
+
+def _parse_delay_token(token: str) -> float | None:
+    if token == "delay":
+        return 0.5
+    if not token.startswith("delay "):
+        return None
+    try:
+        delay = float(token.split(None, 1)[1])
+    except ValueError:
+        return 0.0
+    return max(0.0, delay)
+
+
+def _key_aliases(key: str) -> list[str]:
+    aliases = {
+        "control": ["leftctrl"],
+        "ctrl": ["leftctrl"],
+        "alt": ["leftalt"],
+        "shift": ["leftshift"],
+        "super": ["leftmeta"],
+        "cmd": ["leftmeta"],
+        "meta": ["leftmeta"],
+        "win": ["leftmeta"],
+        "windows": ["leftmeta"],
+        "return": ["enter"],
+        "esc": ["escape"],
+        "escape": ["esc"],
+        "spacebar": ["space"],
+        "plus": ["kpplus"],
+        "+": ["kpplus"],
+        "comma": ["comma"],
+        ",": ["comma"],
+        "numpad_divide": ["kpslash"],
+        "numpad_multiply": ["kpasterisk"],
+        "numpad_minus": ["kpminus"],
+        "numpad_plus": ["kpplus"],
+        "numpad_enter": ["kpenter"],
+        "numpad_decimal": ["kpdot"],
+        "numpad_0": ["kp0"],
+        "numpad_1": ["kp1"],
+        "numpad_2": ["kp2"],
+        "numpad_3": ["kp3"],
+        "numpad_4": ["kp4"],
+        "numpad_5": ["kp5"],
+        "numpad_6": ["kp6"],
+        "numpad_7": ["kp7"],
+        "numpad_8": ["kp8"],
+        "numpad_9": ["kp9"],
+        "\"": ["leftshift", "apostrophe"],
+    }
+    return aliases.get(key, [key])
+
+
+def _send_key_press_steps_with_ydotool(steps: list[tuple[str, list[str] | float]]) -> bool:
+    executable = shutil.which("ydotool")
+    if not executable:
+        return False
+    key_codes = _evdev_key_codes()
+    pressed: list[int] = []
+    command: list[str] = [executable, "key"]
+    try:
+        for operation, payload in steps:
+            if operation == "delay":
+                if len(command) > 2:
+                    subprocess.run(command, check=True, env=_paste_env("ydotool"))
+                    command = [executable, "key"]
+                time.sleep(float(payload))
+                continue
+            codes = [_key_code_for_ydotool(key, key_codes) for key in payload]  # type: ignore[arg-type]
+            if any(code is None for code in codes):
+                _release_ydotool_keys(executable, pressed)
+                return False
+            typed_codes = [int(code) for code in codes if code is not None]
+            if operation == "down":
+                command.extend(f"{code}:1" for code in typed_codes)
+                pressed.extend(typed_codes)
+            elif operation == "up":
+                command.extend(f"{code}:0" for code in reversed(typed_codes))
+                for code in typed_codes:
+                    if code in pressed:
+                        pressed.remove(code)
+            else:
+                command.extend(f"{code}:1" for code in typed_codes)
+                command.extend(f"{code}:0" for code in reversed(typed_codes))
+        command.extend(_release_events(pressed))
+        if len(command) > 2:
+            subprocess.run(command, check=True, env=_paste_env("ydotool"))
+    except (OSError, subprocess.CalledProcessError):
+        _release_ydotool_keys(executable, pressed)
+        return False
+    return True
+
+
+def _release_ydotool_keys(executable: str, codes: list[int]) -> None:
+    releases = _release_events(codes)
+    if releases:
+        try:
+            subprocess.run([executable, "key", *releases], check=True, env=_paste_env("ydotool"))
+        except (OSError, subprocess.CalledProcessError):
+            pass
+
+
+def _release_events(codes: list[int]) -> list[str]:
+    return [f"{code}:0" for code in reversed(codes)]
+
+
+def _key_code_for_ydotool(key: str, key_codes: dict[str, int]) -> int | None:
+    legacy = _YDOTOOL_KEYS.get(key)
+    if legacy is not None:
+        return legacy
+    return key_codes.get(key.lower().replace("-", "_"))
+
+
+def _evdev_key_codes() -> dict[str, int]:
+    aliases = {
+        "escape": "esc",
+        "return": "enter",
+        "period": "dot",
+        ".": "dot",
+        "print": "sysrq",
+    }
+    codes: dict[str, int] = dict(_BUILTIN_EVDEV_KEY_CODES)
+    header = Path("/usr/include/linux/input-event-codes.h")
+    try:
+        text = header.read_text(encoding="utf-8")
+    except OSError:
+        text = ""
+    for name, value in re.findall(r"^#define\s+KEY_([A-Z0-9_]+)\s+(0x[0-9a-fA-F]+|\d+)\b", text, re.MULTILINE):
+        key = name.lower()
+        codes[key] = int(value, 0)
+    for alias, canonical in aliases.items():
+        if canonical in codes:
+            codes[alias] = codes[canonical]
+    return codes
+
+
+def _send_key_press_steps_with_xdotool(steps: list[tuple[str, list[str] | float]]) -> bool:
+    executable = shutil.which("xdotool")
+    if not executable:
+        return False
+    for operation, payload in steps:
+        if operation == "delay":
+            time.sleep(float(payload))
+            continue
+        shortcut = "+".join(_key_name_for_xdotool(key) for key in payload)  # type: ignore[arg-type]
+        if operation == "down":
+            subprocess.run([executable, "keydown", shortcut], check=True)
+        elif operation == "up":
+            subprocess.run([executable, "keyup", shortcut], check=True)
+        else:
+            subprocess.run([executable, "key", shortcut], check=True)
+    return True
+
+
+def _key_name_for_xdotool(key: str) -> str:
+    aliases = {
+        "leftctrl": "ctrl",
+        "leftalt": "alt",
+        "leftshift": "shift",
+        "leftmeta": "Super",
+        "esc": "Escape",
+        "kpplus": "KP_Add",
+        "kpslash": "KP_Divide",
+        "kpasterisk": "KP_Multiply",
+        "kpminus": "KP_Subtract",
+        "kpenter": "KP_Enter",
+        "kpdot": "KP_Decimal",
+        "capslock": "Caps_Lock",
+    }
+    if key in aliases:
+        return aliases[key]
+    if key.startswith("kp") and key[2:].isdigit():
+        return f"KP_{key[2:]}"
+    return _XDOTOOL_KEYS.get(key, key)
+
+
 def _send_shortcut_with_ydotool(keys: list[str]) -> bool:
     executable = shutil.which("ydotool")
-    codes = [_YDOTOOL_KEYS.get(key) for key in keys]
+    key_codes = _evdev_key_codes()
+    codes = [_key_code_for_ydotool(key, key_codes) for key in keys]
     if not executable or any(code is None for code in codes):
         return False
-    down = [f"{code}:1" for code in codes]
-    up = [f"{code}:0" for code in reversed(codes)]
+    typed_codes = [int(code) for code in codes if code is not None]
+    down = [f"{code}:1" for code in typed_codes]
+    up = [f"{code}:0" for code in reversed(typed_codes)]
     subprocess.run([executable, "key", *down, *up], check=True, env=_paste_env("ydotool"))
     return True
 

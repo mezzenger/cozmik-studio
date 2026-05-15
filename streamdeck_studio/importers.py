@@ -565,15 +565,6 @@ def _infer_page_roles(profile: Profile) -> dict[str, str]:
             roles.setdefault("Emojis", page_id)
         if {"Trailblazers", "Github"} & labels:
             roles.setdefault("Links", page_id)
-        if {"Dating", "Bible Study"} & labels:
-            roles.setdefault("Links", page_id)
-        if {"eharmony", "Sniffies"} & labels:
-            roles.setdefault("Dating", page_id)
-        if {"Bible Gateway", "Saint Luke"} & labels:
-            roles.setdefault("Bible Study", page_id)
-        if {"Local ID", "Apple ID", "Home Address"} & labels:
-            roles.setdefault("Personal Info", page_id)
-            roles.setdefault("Local ID", page_id)
 
     for label, page_id in roles.items():
         if label == "Local ID":
@@ -603,8 +594,6 @@ def _wire_linear_pages(profile: Profile, page_ids: list[str]) -> None:
 def _parent_target_for(profile: Profile, page_id: str, label: str, roles: dict[str, str]) -> str:
     if label != "Parent Folder":
         return ""
-    if page_id in {roles.get("Dating"), roles.get("Bible Study")}:
-        return roles.get("Links", profile.current_page)
     if page_id == roles.get("Books"):
         return roles.get("Apps", profile.current_page)
     return profile.current_page

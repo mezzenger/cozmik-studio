@@ -35,16 +35,15 @@ def render_button_image(config: ButtonConfig, size: tuple[int, int] = (144, 144)
     title_font = _fit_font(title, width - 18, max_size=28, min_size=12, bold=True)
     subtitle_font = _font(13, bold=False)
 
-    icon_height = 0
     if icon_path:
-        icon_height = _draw_action_icon(image, icon_path, size, bool(title or subtitle), frame_index)
+        _draw_action_icon(image, icon_path, size, bool(title or subtitle), frame_index)
 
     title_lines = _wrap_text(title, title_font, width - 18, max_lines=3) if title else []
     line_heights = [_text_size(line, title_font)[1] for line in title_lines]
     total_title_height = sum(line_heights) + max(0, len(title_lines) - 1) * 4
     subtitle_height = _text_size(subtitle, subtitle_font)[1] if subtitle else 0
     total_height = total_title_height + (12 + subtitle_height if subtitle else 0)
-    y = max(18 + icon_height, (height - total_height + icon_height) // 2)
+    y = _label_y(config.label_position, height, total_height)
 
     for line, line_height in zip(title_lines, line_heights):
         _draw_centered_text(draw, line, y, width, title_font, foreground)
@@ -90,14 +89,24 @@ def _draw_action_icon(image: Image.Image, path_value: str, size: tuple[int, int]
         icon = _image_frame(path, frame_index).convert("RGBA")
     except OSError:
         return 0
-    max_size = int(min(size) * (0.68 if has_text else 0.92))
+    max_size = int(min(size) * (0.82 if has_text else 0.92))
     icon = _contain_image(icon, (max_size, max_size))
     x = (size[0] - icon.width) // 2
-    y = 12 if has_text else (size[1] - icon.height) // 2
+    y = (size[1] - icon.height) // 2
     base = image.convert("RGBA")
     base.alpha_composite(icon, (x, y))
     image.paste(base.convert("RGB"))
     return icon.height + 8 if has_text else 0
+
+
+def _label_y(position: str, height: int, text_height: int) -> int:
+    if text_height <= 0:
+        return 0
+    if position == "top":
+        return 10
+    if position == "middle":
+        return max(0, (height - text_height) // 2)
+    return max(0, height - text_height - 12)
 
 
 def to_streamdeck_native(deck: DeckImageTarget, image: Image.Image) -> bytes:
@@ -234,7 +243,20 @@ def _image_paths(config: ButtonConfig) -> list[str]:
 
 
 def _image_frame(path: Path, frame_index: int) -> Image.Image:
-    image = Image.open(path)
+    try:
+        stat = path.stat()
+    except OSError:
+        image = Image.open(path)
+        count = getattr(image, "n_frames", 1)
+        if count > 1:
+            image.seek(frame_index % count)
+        return image.copy()
+    return _cached_image_frame(str(path), stat.st_mtime_ns, stat.st_size, frame_index).copy()
+
+
+@lru_cache(maxsize=256)
+def _cached_image_frame(path_value: str, _mtime_ns: int, _size: int, frame_index: int) -> Image.Image:
+    image = Image.open(path_value)
     count = getattr(image, "n_frames", 1)
     if count > 1:
         image.seek(frame_index % count)

@@ -1,13 +1,16 @@
 from __future__ import annotations
 
-from io import BytesIO
 from datetime import datetime
 from typing import Any
 import json
 import os
 from pathlib import Path
 import shutil
+import socket
 import subprocess
+import sys
+import tempfile
+import threading
 import time
 
 import gi
@@ -17,53 +20,112 @@ gi.require_version("Gdk", "4.0")
 gi.require_version("GdkPixbuf", "2.0")
 gi.require_version("Gtk", "4.0")
 
-from gi.repository import Adw, Gdk, GdkPixbuf, Gio, GLib, Gtk
+from gi.repository import Adw, Gdk, GdkPixbuf, Gio, GLib, GObject, Gtk
 
+from . import __app_name__
 from .action_icons import action_icons
 from .actions import ActionError, copy_text_action, paste_text_action, run_action
 from .deck import StreamDeckController
 from .diagnostics import profile_diagnostics, redact_target
 from .images import render_button_image
 from .importers import ImportProfileError, import_profile
-from .model import ACTION_TYPES, Profile, config_dir, load_profile, save_profile
+from .model import (
+    ACTION_TYPES,
+    LABEL_POSITIONS,
+    MCP_PROFILE_ID,
+    MCP_PROFILE_NAME,
+    NEW_PROFILE_NAME,
+    Profile,
+    config_dir,
+    create_default_icon_profile,
+    delete_profile_by_id,
+    ensure_mcp_profile,
+    list_profile_ids,
+    load_active_profile,
+    load_default_profile_id,
+    load_profile_by_id,
+    profile_id_from_name,
+    profile_action_icons_dir,
+    profile_is_saved,
+    profile_name_exists,
+    next_profile_name,
+    save_active_profile_id,
+    save_default_profile_id,
+    save_profile,
+    save_profile_by_id,
+)
+
+
+_BRANDING_DIR = Path(__file__).parent / "resources" / "branding"
+_BRAND_BANNER_PATH = _BRANDING_DIR / "cozmik-studio-banner.png"
 
 
 class KeyButton(Gtk.Button):
-    def __init__(self, index: int, on_clicked) -> None:
+    def __init__(self, index: int, on_clicked, on_dropped) -> None:
         super().__init__()
         self.index = index
         self.add_css_class("key-button")
-        self.set_size_request(124, 132)
+        self.set_size_request(96, 96)
         self.connect("clicked", lambda *_args: on_clicked(index))
 
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        box.set_margin_top(8)
-        box.set_margin_bottom(8)
-        box.set_margin_start(8)
-        box.set_margin_end(8)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        box.set_margin_top(6)
+        box.set_margin_bottom(6)
+        box.set_margin_start(6)
+        box.set_margin_end(6)
         self.image = Gtk.Image()
-        self.image.set_pixel_size(88)
+        self.image.set_pixel_size(66)
         self.label = Gtk.Label()
         self.label.set_ellipsize(3)
-        self.label.set_max_width_chars(14)
+        self.label.set_max_width_chars(12)
         self.label.add_css_class("key-label")
         box.append(self.image)
         box.append(self.label)
         self.set_child(box)
+
+        drag_source = Gtk.DragSource.new()
+        drag_source.set_actions(Gdk.DragAction.MOVE)
+        drag_source.connect("prepare", self._prepare_drag)
+        drag_source.connect("drag-begin", lambda *_args: self.add_css_class("drag-source"))
+        drag_source.connect("drag-end", lambda *_args: self.remove_css_class("drag-source"))
+        self.add_controller(drag_source)
+
+        drop_target = Gtk.DropTarget.new(GObject.TYPE_STRING, Gdk.DragAction.MOVE)
+        drop_target.connect("enter", self._drop_enter)
+        drop_target.connect("leave", lambda *_args: self.remove_css_class("drop-target"))
+        drop_target.connect("drop", lambda _target, value, _x, _y: self._drop(value, on_dropped))
+        self.add_controller(drop_target)
 
     def set_preview(self, pixbuf: GdkPixbuf.Pixbuf, label: str) -> None:
         self.image.set_from_pixbuf(pixbuf)
         self.label.set_text(label)
         self.set_tooltip_text(label)
 
+    def _prepare_drag(self, _source, _x: float, _y: float):
+        return Gdk.ContentProvider.new_for_value(str(self.index))
+
+    def _drop_enter(self, _target, _x: float, _y: float) -> Gdk.DragAction:
+        self.add_css_class("drop-target")
+        return Gdk.DragAction.MOVE
+
+    def _drop(self, value: str, on_dropped) -> bool:
+        self.remove_css_class("drop-target")
+        try:
+            source_index = int(value)
+        except (TypeError, ValueError):
+            return False
+        on_dropped(source_index, self.index)
+        return True
+
 
 class MainWindow(Adw.ApplicationWindow):
     def __init__(self, app: Adw.Application) -> None:
-        super().__init__(application=app, title="Stream Deck Studio")
-        self.set_default_size(1120, 720)
+        super().__init__(application=app, title=__app_name__)
+        self.set_default_size(980, 640)
 
         self.startup_message = ""
-        self.profile = self._load_profile()
+        self.profile_id, self.profile = self._load_profile()
+        self.default_profile_id = load_default_profile_id()
         self.deck = StreamDeckController()
         self.deck.on_key_event(lambda key, pressed: GLib.idle_add(self._log_key_event, key, pressed))
         self.deck.on_key_pressed(lambda key: GLib.idle_add(self._key_pressed, key))
@@ -79,13 +141,25 @@ class MainWindow(Adw.ApplicationWindow):
         self._undo_stack: list[dict[str, Any]] = []
         self.diagnostics_window = None
         self.diagnostics_view = None
+        self._force_quit = False
+        self._tray_available = False
+        self._tray_hold = False
+        self._tray_process: subprocess.Popen | None = None
+        self._tray_socket: socket.socket | None = None
+        self._tray_socket_path: Path | None = None
 
         self._build_ui()
+        self._start_tray_indicator()
         self._connect_deck()
         if self.startup_message:
             self._set_status(self.startup_message)
 
     def do_close_request(self):
+        self._save_profile(silent=True)
+        if self._tray_available and not self._force_quit:
+            self._hide_to_tray()
+            return True
+        self._shutdown_tray_indicator()
         self._save_profile(silent=True)
         self.deck.close()
         return False
@@ -97,52 +171,76 @@ class MainWindow(Adw.ApplicationWindow):
 
         header = Adw.HeaderBar()
         root.append(header)
-        title = Adw.WindowTitle(title="Stream Deck Studio", subtitle="Button profiles and launchers")
-        header.set_title_widget(title)
+        title_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        title_box.set_valign(Gtk.Align.CENTER)
+        if _BRAND_BANNER_PATH.exists():
+            brand = Gtk.Image()
+            brand.set_from_pixbuf(GdkPixbuf.Pixbuf.new_from_file_at_scale(str(_BRAND_BANNER_PATH), 184, 76, True))
+            brand.set_tooltip_text(__app_name__)
+            title_box.append(brand)
+        title = Adw.WindowTitle(title=__app_name__, subtitle="Button profiles and launchers")
+        title_box.append(title)
+        header.set_title_widget(title_box)
 
-        content = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=16)
-        content.set_margin_top(16)
-        content.set_margin_bottom(16)
-        content.set_margin_start(16)
-        content.set_margin_end(16)
+        content = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        content.set_margin_top(12)
+        content.set_margin_bottom(12)
+        content.set_margin_start(12)
+        content.set_margin_end(12)
         root.append(content)
 
-        left = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        left = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         left.set_hexpand(True)
         content.append(left)
 
         self.device_label = Gtk.Label(label="Offline editor", xalign=0)
         self.device_label.add_css_class("device-label")
+        self.profile_combo = Gtk.ComboBoxText()
+        self.profile_combo.set_hexpand(True)
+        self.profile_combo.connect("changed", lambda *_args: self._profile_changed())
+        profile_click = Gtk.GestureClick()
+        profile_click.set_button(3)
+        profile_click.connect("pressed", lambda *_args: self._show_profile_name_entry())
+        self.profile_combo.add_controller(profile_click)
+        self.profile_name_entry = Gtk.Entry(max_length=48)
+        self.profile_name_entry.set_placeholder_text("Imported")
+        self.profile_name_entry.connect("activate", lambda *_args: self._profile_name_changed())
+        profile_name_focus = Gtk.EventControllerFocus()
+        profile_name_focus.connect("leave", lambda *_args: self._profile_name_changed())
+        self.profile_name_entry.add_controller(profile_name_focus)
         self.page_combo = Gtk.ComboBoxText()
         self.page_combo.set_hexpand(True)
         self.page_combo.connect("changed", lambda *_args: self._page_changed())
         root.insert_child_after(self._top_toolbar(), header)
 
-        self.grid = Gtk.Grid(column_spacing=10, row_spacing=10)
+        self.grid = Gtk.Grid(column_spacing=8, row_spacing=8)
         left.append(self.grid)
 
-        right = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
-        right.set_size_request(380, -1)
+        right = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        right.set_size_request(320, -1)
         content.append(right)
 
         editor = Gtk.Frame(label="Button")
         right.append(editor)
-        form = Gtk.Grid(column_spacing=10, row_spacing=10)
-        form.set_margin_top(14)
-        form.set_margin_bottom(14)
-        form.set_margin_start(14)
-        form.set_margin_end(14)
+        form = Gtk.Grid(column_spacing=8, row_spacing=8)
+        form.set_margin_top(10)
+        form.set_margin_bottom(10)
+        form.set_margin_start(10)
+        form.set_margin_end(10)
         editor.set_child(form)
 
         self.index_label = Gtk.Label(label="1", xalign=0)
         self.label_entry = Gtk.Entry(max_length=48)
         self.subtitle_entry = Gtk.Entry(max_length=48)
+        self.label_position_combo = Gtk.ComboBoxText()
+        for position in LABEL_POSITIONS:
+            self.label_position_combo.append_text(position)
         self.action_combo = Gtk.ComboBoxText()
         for action in ACTION_TYPES:
             self.action_combo.append_text(action)
         self.target_view = Gtk.TextView()
         self.target_view.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
-        self.target_view.set_size_request(-1, 110)
+        self.target_view.set_size_request(-1, 78)
         self.background_button = Gtk.ColorButton()
         self.foreground_button = Gtk.ColorButton()
         self.background_image_entry = Gtk.Entry()
@@ -151,8 +249,9 @@ class MainWindow(Adw.ApplicationWindow):
         self._attach_row(form, 0, "Number", self.index_label)
         self._attach_row(form, 1, "Label", self.label_entry)
         self._attach_row(form, 2, "Subtitle", self.subtitle_entry)
-        self._attach_row(form, 3, "Action", self.action_combo)
-        self._attach_row(form, 4, "Target", self.target_view)
+        self._attach_row(form, 3, "Label Position", self.label_position_combo)
+        self._attach_row(form, 4, "Action", self.action_combo)
+        self._attach_row(form, 5, "Target", self.target_view)
 
         target_buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         browse = Gtk.Button(label="Browse")
@@ -161,15 +260,15 @@ class MainWindow(Adw.ApplicationWindow):
         run.connect("clicked", lambda *_args: self._run_selected())
         target_buttons.append(browse)
         target_buttons.append(run)
-        form.attach(target_buttons, 1, 5, 1, 1)
+        form.attach(target_buttons, 1, 6, 1, 1)
 
         color_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         color_row.append(self.background_button)
         color_row.append(self.foreground_button)
-        self._attach_row(form, 6, "Colors", color_row)
+        self._attach_row(form, 7, "Colors", color_row)
 
-        self._attach_row(form, 7, "Background Image", self._image_row(self.background_image_entry, "background"))
-        self._attach_row(form, 8, "Action Image", self._image_row(self.action_image_entry, "action"))
+        self._attach_row(form, 8, "Background Image", self._image_row(self.background_image_entry, "background"))
+        self._attach_row(form, 9, "Action Image", self._image_row(self.action_image_entry, "action"))
 
         self.status_label = Gtk.Label(xalign=0)
         self.status_label.add_css_class("status-label")
@@ -178,6 +277,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.label_entry.connect("changed", lambda *_args: self._editor_changed())
         self.subtitle_entry.connect("changed", lambda *_args: self._editor_changed())
         self.action_combo.connect("changed", lambda *_args: self._editor_changed())
+        self.label_position_combo.connect("changed", lambda *_args: self._editor_changed())
         self.target_view.get_buffer().connect("changed", lambda *_args: self._editor_changed())
         self.background_button.connect("color-set", lambda *_args: self._color_changed())
         self.foreground_button.connect("color-set", lambda *_args: self._color_changed())
@@ -185,21 +285,27 @@ class MainWindow(Adw.ApplicationWindow):
         self.action_image_entry.connect("changed", lambda *_args: self._editor_changed())
 
         self._rebuild_grid()
+        self._refresh_profile_combo()
         self._refresh_page_combo()
         self._select_button(0)
         self._refresh_diagnostics()
 
     def _top_toolbar(self) -> Gtk.Box:
-        bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         bar.add_css_class("top-toolbar")
-        bar.set_margin_top(12)
-        bar.set_margin_start(16)
-        bar.set_margin_end(16)
+        bar.set_margin_top(10)
+        bar.set_margin_start(12)
+        bar.set_margin_end(12)
 
-        status_group = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        status_group = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
         status_group.set_hexpand(True)
         status_group.append(self.device_label)
-        page_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        profile_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        profile_row.append(Gtk.Label(label="Profile", xalign=0))
+        profile_row.append(self.profile_combo)
+        profile_row.append(self.profile_name_entry)
+        status_group.append(profile_row)
+        page_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         page_row.append(Gtk.Label(label="Page", xalign=0))
         page_row.append(self.page_combo)
         status_group.append(page_row)
@@ -208,6 +314,8 @@ class MainWindow(Adw.ApplicationWindow):
         nav_group = self._toolbar_group()
         nav_group.append(self._icon_button("go-previous-symbolic", "Previous Page", self._previous_page))
         nav_group.append(self._icon_button("go-next-symbolic", "Next Page", self._next_page))
+        nav_group.append(self._icon_button("list-add-symbolic", "New Profile", self._new_profile))
+        nav_group.append(self._icon_button("user-trash-symbolic", "Delete Profile", self._delete_current_profile))
         nav_group.append(self._icon_button("view-refresh-symbolic", "Reconnect", self._connect_deck))
         bar.append(nav_group)
 
@@ -221,8 +329,11 @@ class MainWindow(Adw.ApplicationWindow):
         bar.append(edit_group)
 
         file_group = self._toolbar_group()
-        file_group.append(self._text_button("Import", self._import_profile))
-        file_group.append(self._text_button("Export", self._export_profile))
+        file_group.append(self._icon_button("document-open-symbolic", "Import Profile", self._import_profile))
+        file_group.append(self._icon_button("document-save-as-symbolic", "Export Profile", self._export_profile))
+        file_group.append(self._icon_button("emblem-favorite-symbolic", "Make Default Profile", self._make_default_profile))
+        self.mcp_toggle = self._toggle_button("MCP", self._mcp_toggled)
+        file_group.append(self.mcp_toggle)
         file_group.append(self._icon_button("dialog-information-symbolic", "Diagnostics", self._show_diagnostics))
         bar.append(file_group)
         return bar
@@ -235,14 +346,21 @@ class MainWindow(Adw.ApplicationWindow):
     def _icon_button(self, icon_name: str, tooltip: str, callback) -> Gtk.Button:
         button = Gtk.Button(icon_name=icon_name)
         button.add_css_class("toolbar-button")
+        button.set_size_request(43, 32)
         button.set_tooltip_text(tooltip)
         button.connect("clicked", lambda *_args: callback())
         return button
 
-    def _text_button(self, label: str, callback) -> Gtk.Button:
-        button = Gtk.Button(label=label)
+    def _toggle_button(self, label: str, callback) -> Gtk.ToggleButton:
+        button_label = Gtk.Label(label=label)
+        button_label.add_css_class("file-button-label")
+        button = Gtk.ToggleButton()
+        button.set_child(button_label)
         button.add_css_class("toolbar-button")
-        button.connect("clicked", lambda *_args: callback())
+        button.add_css_class("file-button")
+        button.set_size_request(43, 32)
+        button.set_tooltip_text(f"{label} profile")
+        button.connect("toggled", lambda *_args: callback())
         return button
 
     def _attach_row(self, form: Gtk.Grid, row: int, label: str, widget: Gtk.Widget) -> None:
@@ -265,8 +383,7 @@ class MainWindow(Adw.ApplicationWindow):
     def _connect_deck(self) -> None:
         info = self.deck.connect_first()
         if info.connected:
-            if self.profile.button_count() != info.key_count:
-                self.profile.set_layout(info.rows, info.columns)
+            self._match_connected_deck_layout()
             self.device_label.set_text("Connected")
             self.profile.page_ids()
             self._rebuild_grid()
@@ -278,6 +395,101 @@ class MainWindow(Adw.ApplicationWindow):
                 self._set_status(info.error)
         self._select_button(min(self.selected_index, self.profile.button_count() - 1))
 
+    def _start_tray_indicator(self) -> None:
+        if not _tray_indicator_available():
+            self._set_status("Panel icon unavailable: install Ayatana AppIndicator and enable GNOME AppIndicator support.", "error")
+            return
+        try:
+            sock, socket_path = self._create_tray_socket()
+            self._tray_socket = sock
+            self._tray_socket_path = socket_path
+            thread = threading.Thread(target=self._tray_command_loop, daemon=True)
+            thread.start()
+            self._tray_process = subprocess.Popen(
+                [sys.executable, "-m", "streamdeck_studio.tray_indicator", str(os.getpid()), str(socket_path)],
+                start_new_session=True,
+            )
+        except OSError as exc:
+            self._set_status(f"Panel icon unavailable: {exc}", "error")
+            self._shutdown_tray_indicator()
+            return
+        self._tray_available = True
+        if not self._tray_hold:
+            self.get_application().hold()
+            self._tray_hold = True
+
+    def _create_tray_socket(self) -> tuple[socket.socket, Path]:
+        runtime_dir = Path(os.environ.get("XDG_RUNTIME_DIR", tempfile.gettempdir()))
+        socket_path = runtime_dir / f"cozmik-studio-{os.getpid()}.sock"
+        socket_path.unlink(missing_ok=True)
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock.bind(str(socket_path))
+        sock.listen(4)
+        sock.settimeout(0.5)
+        return sock, socket_path
+
+    def _tray_command_loop(self) -> None:
+        while True:
+            sock = self._tray_socket
+            if sock is None:
+                return
+            try:
+                client, _address = sock.accept()
+            except socket.timeout:
+                continue
+            except OSError:
+                return
+            with client:
+                try:
+                    command = client.recv(64).decode("utf-8", errors="replace").strip()
+                except OSError:
+                    continue
+            if command:
+                GLib.idle_add(self._handle_tray_command, command)
+
+    def _handle_tray_command(self, command: str) -> bool:
+        if command == "show":
+            self._show_from_tray()
+        elif command == "hide":
+            self._hide_to_tray()
+        elif command == "quit":
+            self._quit_from_tray()
+        return False
+
+    def _show_from_tray(self) -> None:
+        self.set_visible(True)
+        self.present()
+        self._set_status("Cozmik Studio restored from panel.", "success")
+
+    def _hide_to_tray(self) -> None:
+        self.set_visible(False)
+        self._set_status("Cozmik Studio is running in the panel.", "success")
+
+    def _quit_from_tray(self) -> None:
+        self._force_quit = True
+        self._save_profile(silent=True)
+        self.deck.close()
+        self._shutdown_tray_indicator()
+        self.get_application().quit()
+
+    def _shutdown_tray_indicator(self) -> None:
+        self._tray_available = False
+        if self._tray_socket is not None:
+            try:
+                self._tray_socket.close()
+            except OSError:
+                pass
+            self._tray_socket = None
+        if self._tray_socket_path is not None:
+            self._tray_socket_path.unlink(missing_ok=True)
+            self._tray_socket_path = None
+        if self._tray_process is not None and self._tray_process.poll() is None:
+            self._tray_process.terminate()
+        self._tray_process = None
+        if self._tray_hold:
+            self.get_application().release()
+            self._tray_hold = False
+
     def _rebuild_grid(self) -> None:
         child = self.grid.get_first_child()
         while child:
@@ -286,10 +498,27 @@ class MainWindow(Adw.ApplicationWindow):
             child = next_child
         self.key_buttons.clear()
         for index in range(self.profile.button_count()):
-            button = KeyButton(index, self._select_button)
+            button = KeyButton(index, self._select_button, self._move_button)
             self.key_buttons.append(button)
             self.grid.attach(button, index % self.profile.columns, index // self.profile.columns, 1, 1)
         self._refresh_all_previews()
+
+    def _move_button(self, source_index: int, target_index: int) -> None:
+        if source_index == target_index:
+            self._select_button(target_index)
+            return
+        if source_index < 0 or target_index < 0:
+            return
+        if source_index >= self.profile.button_count() or target_index >= self.profile.button_count():
+            return
+        self._push_undo()
+        self.profile.swap_buttons(source_index, target_index)
+        self._refresh_preview(source_index)
+        self._refresh_preview(target_index)
+        self._select_button(target_index)
+        self.deck.apply_profile(self.profile)
+        self._save_profile(silent=True)
+        self._set_status(f"Moved button {source_index + 1} to {target_index + 1}.", "success")
 
     def _select_button(self, index: int) -> None:
         if index < 0 or index >= self.profile.button_count():
@@ -302,8 +531,12 @@ class MainWindow(Adw.ApplicationWindow):
                 button.add_css_class("selected")
         config = self.profile.get_button(index)
         self.index_label.set_text(str(index + 1))
+        self._sync_profile_name_entry()
         self.label_entry.set_text(config.label)
         self.subtitle_entry.set_text(config.subtitle)
+        self.label_position_combo.set_active(
+            LABEL_POSITIONS.index(config.label_position) if config.label_position in LABEL_POSITIONS else 0
+        )
         self.action_combo.set_active(ACTION_TYPES.index(config.action_type) if config.action_type in ACTION_TYPES else 0)
         self._set_text_view(config.target)
         self._set_color(self.background_button, config.background)
@@ -320,6 +553,7 @@ class MainWindow(Adw.ApplicationWindow):
         config = self.profile.get_button(self.selected_index)
         config.label = self.label_entry.get_text()
         config.subtitle = self.subtitle_entry.get_text()
+        config.label_position = self.label_position_combo.get_active_text() or "bottom"
         config.action_type = self.action_combo.get_active_text() or "none"
         config.target = self._get_text_view()
         config.background = _rgba_to_hex(self.background_button.get_rgba())
@@ -329,6 +563,8 @@ class MainWindow(Adw.ApplicationWindow):
         self._refresh_preview(self.selected_index)
         self.deck.apply_button(self.profile, self.selected_index)
         self._save_profile(silent=True)
+        if self._is_unnamed_profile(self.profile):
+            self._show_profile_name_entry()
 
     def _page_changed(self) -> None:
         if self._updating_editor:
@@ -342,6 +578,194 @@ class MainWindow(Adw.ApplicationWindow):
         self.deck.apply_profile(self.profile)
         self._save_profile(silent=True)
         self._set_status(f"Page: {self.profile.page_names.get(active, active)}")
+
+    def _profile_changed(self) -> None:
+        if self._updating_editor:
+            return
+        active = self.profile_combo.get_active_id()
+        if not active or active == self.profile_id:
+            return
+        try:
+            self._save_profile(silent=True)
+            self.profile = load_profile_by_id(active)
+            self.profile_id = active
+            save_active_profile_id(active)
+            layout_changed = self._match_connected_deck_layout()
+        except (OSError, json.JSONDecodeError, ValueError) as exc:
+            self._set_status(f"Could not switch profile: {exc}", "error")
+            self._refresh_profile_combo()
+            return
+        self._undo_stack.clear()
+        self._update_undo_state()
+        self._refresh_page_combo()
+        self._rebuild_grid()
+        self._select_button(0)
+        self.deck.apply_profile(self.profile)
+        if layout_changed:
+            self._save_profile(silent=True)
+        self._set_status(f"Profile: {self.profile.name}", "success")
+        self._refresh_diagnostics()
+
+    def _match_connected_deck_layout(self) -> bool:
+        if not self.deck.info.connected:
+            return False
+        if self.profile.rows == self.deck.info.rows and self.profile.columns == self.deck.info.columns:
+            return False
+        self.profile.set_layout(self.deck.info.rows, self.deck.info.columns)
+        return True
+
+    def _refresh_profile_combo(self) -> None:
+        self._updating_editor = True
+        self.profile_combo.remove_all()
+        seen_active = False
+        self.default_profile_id = load_default_profile_id()
+        for profile_id in list_profile_ids():
+            try:
+                profile = load_profile_by_id(profile_id)
+            except (OSError, json.JSONDecodeError, ValueError):
+                continue
+            self.profile_combo.append(profile_id, self._profile_display_name(profile_id, profile))
+            seen_active = seen_active or profile_id == self.profile_id
+        if not seen_active:
+            self.profile_combo.append(self.profile_id, self._profile_display_name(self.profile_id, self.profile))
+        self.profile_combo.set_active_id(self.profile_id)
+        self._sync_profile_name_entry()
+        self._updating_editor = False
+        self._refresh_mcp_toggle()
+
+    def _show_profile_name_entry(self) -> None:
+        self.profile_name_entry.set_visible(True)
+        self.profile_name_entry.grab_focus()
+        self.profile_name_entry.set_position(-1)
+
+    def _sync_profile_name_entry(self) -> None:
+        if not hasattr(self, "profile_name_entry"):
+            return
+        is_placeholder = self._is_imported_placeholder(self.profile) or self._is_unnamed_profile(self.profile)
+        self.profile_name_entry.set_text("" if is_placeholder else self.profile.name)
+        self.profile_name_entry.set_visible(is_placeholder)
+
+    def _profile_name_changed(self) -> None:
+        if self._updating_editor:
+            return
+        name = self.profile_name_entry.get_text().strip()
+        if not name:
+            self._sync_profile_name_entry()
+            return
+        if name == self.profile.name:
+            self.profile_name_entry.set_visible(False)
+            return
+        if profile_name_exists(name, exclude_profile_id=self.profile_id):
+            self.profile_name_entry.set_text(self.profile.name if not self._is_unnamed_profile(self.profile) else "")
+            self.profile_name_entry.set_visible(True)
+            self.profile_name_entry.grab_focus()
+            self._set_status(f"Profile name already exists: {name}. Delete that profile before reusing the name.", "error")
+            return
+        self.profile.name = name
+        self._save_profile(silent=True)
+        self._refresh_profile_combo()
+        self.profile_name_entry.set_visible(False)
+        self._set_status(f"Renamed profile: {name}", "success")
+
+    def _new_profile(self) -> None:
+        try:
+            self._save_profile(silent=True)
+            name = next_profile_name()
+            self.profile = create_default_icon_profile(name, self.profile.rows, self.profile.columns)
+            self.profile_id = profile_id_from_name(name)
+            save_profile_by_id(self.profile_id, self.profile)
+            save_active_profile_id(self.profile_id)
+        except (OSError, json.JSONDecodeError, ValueError) as exc:
+            self._set_status(f"Could not create profile: {exc}", "error")
+            return
+        self._undo_stack.clear()
+        self._update_undo_state()
+        self._refresh_profile_combo()
+        self._refresh_page_combo()
+        self._rebuild_grid()
+        self._select_button(0)
+        self.deck.apply_profile(self.profile)
+        self._show_profile_name_entry()
+        self._set_status("New profile created. Enter a profile name.", "success")
+        self._refresh_diagnostics()
+
+    def _delete_current_profile(self) -> None:
+        dialog = Gtk.MessageDialog(
+            transient_for=self,
+            modal=True,
+            message_type=Gtk.MessageType.WARNING,
+            buttons=Gtk.ButtonsType.CANCEL,
+            text=f"Delete profile '{self._profile_display_name(self.profile_id, self.profile)}'?",
+        )
+        dialog.add_button("Delete", Gtk.ResponseType.ACCEPT)
+        dialog.connect("response", self._on_delete_profile_response)
+        dialog.present()
+
+    def _on_delete_profile_response(self, dialog: Gtk.MessageDialog, response: int) -> None:
+        dialog.destroy()
+        if response != Gtk.ResponseType.ACCEPT:
+            return
+        deleted_name = self._profile_display_name(self.profile_id, self.profile)
+        try:
+            delete_profile_by_id(self.profile_id)
+            self._load_profile_after_delete()
+        except (OSError, json.JSONDecodeError, ValueError) as exc:
+            self._set_status(f"Could not delete profile: {exc}", "error")
+            return
+        self._undo_stack.clear()
+        self._update_undo_state()
+        self._refresh_profile_combo()
+        self._refresh_page_combo()
+        self._rebuild_grid()
+        self._select_button(0)
+        self.deck.apply_profile(self.profile)
+        self._set_status(f"Deleted profile: {deleted_name}", "success")
+        self._refresh_diagnostics()
+
+    def _load_profile_after_delete(self) -> None:
+        remaining = list_profile_ids()
+        saved_remaining = [profile_id for profile_id in remaining if profile_is_saved(profile_id)]
+        if not saved_remaining:
+            self.profile_id = "default"
+            self.profile = create_default_icon_profile(NEW_PROFILE_NAME, self.profile.rows, self.profile.columns)
+            save_active_profile_id(self.profile_id)
+            return
+        next_id = self.default_profile_id if self.default_profile_id in saved_remaining else saved_remaining[0]
+        self.profile_id = next_id
+        self.profile = load_profile_by_id(next_id)
+        save_active_profile_id(next_id)
+
+    def _make_default_profile(self) -> None:
+        if self._is_imported_placeholder(self.profile):
+            self.profile.name = "Default"
+        self.default_profile_id = self.profile_id
+        save_default_profile_id(self.profile_id)
+        self._save_profile(silent=True)
+        self._refresh_profile_combo()
+        self._set_status(f"Default profile: {self._profile_display_name(self.profile_id, self.profile)}", "success")
+
+    def _profile_display_name(self, profile_id: str, profile: Profile) -> str:
+        name = profile.name.strip()
+        if profile_id == self.default_profile_id:
+            if not name or name.lower() in {"default", "imported"}:
+                return "Default"
+            return f"{name} (Default)"
+        if self._is_imported_placeholder(profile):
+            return "Imported"
+        return name or "Untitled"
+
+    def _is_imported_placeholder(self, profile: Profile) -> bool:
+        return profile.name.strip().lower() == "imported"
+
+    def _is_unnamed_profile(self, profile: Profile) -> bool:
+        return profile.name.strip().casefold().startswith(NEW_PROFILE_NAME.casefold())
+
+    def _refresh_mcp_toggle(self) -> None:
+        if not hasattr(self, "mcp_toggle"):
+            return
+        self._updating_editor = True
+        self.mcp_toggle.set_active(self.profile_id == MCP_PROFILE_ID)
+        self._updating_editor = False
 
     def _refresh_page_combo(self) -> None:
         self._updating_editor = True
@@ -414,40 +838,54 @@ class MainWindow(Adw.ApplicationWindow):
         toolbar.append(clear)
         root.append(toolbar)
 
-        scrolled = Gtk.ScrolledWindow()
-        scrolled.set_vexpand(True)
-        root.append(scrolled)
-        flow = Gtk.FlowBox()
-        flow.set_selection_mode(Gtk.SelectionMode.NONE)
-        flow.set_max_children_per_line(5)
-        flow.set_column_spacing(10)
-        flow.set_row_spacing(10)
-        scrolled.set_child(flow)
+        notebook = Gtk.Notebook()
+        notebook.set_vexpand(True)
+        root.append(notebook)
 
-        for option in action_icons():
-            button = Gtk.Button()
-            button.set_tooltip_text(option.name)
-            box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-            box.set_margin_top(8)
-            box.set_margin_bottom(8)
-            box.set_margin_start(8)
-            box.set_margin_end(8)
-            preview = Gtk.Image()
-            try:
-                pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_scale(str(option.path), 56, 56, True)
-                preview.set_from_pixbuf(pixbuf)
-            except GLib.Error:
-                preview.set_from_icon_name("image-missing-symbolic")
-            label = Gtk.Label(label=option.name)
-            label.set_max_width_chars(12)
-            label.set_ellipsize(3)
-            box.append(preview)
-            box.append(label)
-            button.set_child(box)
-            button.connect("clicked", lambda *_args, path=option.path: (self.action_image_entry.set_text(str(path)), window.close()))
-            flow.insert(button, -1)
+        grouped_icons: dict[str, list[Any]] = {}
+        for option in action_icons(self.profile_id):
+            grouped_icons.setdefault(option.group, []).append(option)
+
+        for group in sorted(grouped_icons, key=self._action_icon_group_sort_key):
+            options = grouped_icons[group]
+            scrolled = Gtk.ScrolledWindow()
+            scrolled.set_vexpand(True)
+            flow = Gtk.FlowBox()
+            flow.set_selection_mode(Gtk.SelectionMode.NONE)
+            flow.set_max_children_per_line(5)
+            flow.set_column_spacing(10)
+            flow.set_row_spacing(10)
+            scrolled.set_child(flow)
+            for option in options:
+                flow.insert(self._action_icon_gallery_button(option, window), -1)
+            notebook.append_page(scrolled, Gtk.Label(label=group))
 
         window.present()
+
+    def _action_icon_group_sort_key(self, group: str) -> tuple[int, str]:
+        if group == "Default":
+            return (0, "")
+        return (1, group.casefold())
+
+    def _action_icon_gallery_button(self, option: Any, window: Gtk.Window) -> Gtk.Button:
+        button = Gtk.Button()
+        button.set_tooltip_text(option.name)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        box.set_margin_top(4)
+        box.set_margin_bottom(6)
+        box.set_margin_start(4)
+        box.set_margin_end(4)
+        preview = Gtk.Image()
+        preview.set_pixel_size(66)
+        try:
+            pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_scale(str(option.path), 66, 66, True)
+            preview.set_from_pixbuf(pixbuf)
+        except GLib.Error:
+            preview.set_from_icon_name("image-missing-symbolic")
+        box.append(preview)
+        button.set_child(box)
+        button.connect("clicked", lambda *_args, path=option.path: (self.action_image_entry.set_text(str(path)), window.close()))
+        return button
 
     def _on_button_image_chosen(self, dialog: Gtk.FileChooserNative, response: int, image_kind: str) -> None:
         if response == Gtk.ResponseType.ACCEPT:
@@ -456,8 +894,29 @@ class MainWindow(Adw.ApplicationWindow):
                 if image_kind == "background":
                     self.background_image_entry.set_text(file.get_path())
                 else:
-                    self.action_image_entry.set_text(file.get_path())
+                    try:
+                        self.action_image_entry.set_text(str(self._import_action_icon_file(Path(file.get_path()))))
+                    except OSError as exc:
+                        self._set_status(f"Could not import action icon: {exc}", "error")
         dialog.destroy()
+
+    def _import_action_icon_file(self, source: Path) -> Path:
+        target_directory = profile_action_icons_dir(self.profile_id)
+        target_directory.mkdir(parents=True, exist_ok=True)
+        stem = self._safe_asset_stem(source.stem) or "icon"
+        suffix = source.suffix.lower() if source.suffix else ".png"
+        target = target_directory / f"{stem}{suffix}"
+        counter = 2
+        while target.exists() and not source.samefile(target):
+            target = target_directory / f"{stem}-{counter}{suffix}"
+            counter += 1
+        if target.exists() and source.samefile(target):
+            return target
+        shutil.copy2(source, target)
+        return target
+
+    def _safe_asset_stem(self, value: str) -> str:
+        return "".join(char.lower() if char.isalnum() else "-" for char in value).strip("-")
 
     def _run_selected(self) -> None:
         self._run_index(self.selected_index)
@@ -525,7 +984,7 @@ class MainWindow(Adw.ApplicationWindow):
     def _save_now(self) -> None:
         if self._save_profile(silent=False):
             self.deck.apply_profile(self.profile)
-            self._set_status("Profile saved and applied.")
+            self._set_status("Profile saved and applied.", "success")
 
     def _clear_selected(self) -> None:
         self._push_undo()
@@ -548,6 +1007,10 @@ class MainWindow(Adw.ApplicationWindow):
                 try:
                     self._push_undo()
                     self.profile = import_profile(Path(file.get_path()))
+                    self.profile_id = self._profile_id_for_import(self.profile.name)
+                    save_active_profile_id(self.profile_id)
+                    save_profile_by_id(self.profile_id, self.profile)
+                    self._refresh_profile_combo()
                     self._refresh_page_combo()
                     self._rebuild_grid()
                     self._select_button(0)
@@ -562,6 +1025,35 @@ class MainWindow(Adw.ApplicationWindow):
                     self._set_status(f"Import failed: {exc}")
         dialog.destroy()
 
+    def _mcp_toggled(self) -> None:
+        if self._updating_editor:
+            return
+        if self.profile_id == MCP_PROFILE_ID:
+            self._refresh_mcp_toggle()
+            return
+        self._use_mcp_profile()
+
+    def _use_mcp_profile(self) -> None:
+        try:
+            self._save_profile(silent=True)
+            self.profile = ensure_mcp_profile(self.profile.rows, self.profile.columns)
+            self.profile_id = MCP_PROFILE_ID
+            save_active_profile_id(self.profile_id)
+        except (OSError, json.JSONDecodeError, ValueError) as exc:
+            self._set_status(f"Could not create MCP profile: {exc}", "error")
+            return
+        self._undo_stack.clear()
+        self._update_undo_state()
+        self._refresh_profile_combo()
+        self._refresh_mcp_toggle()
+        self._refresh_page_combo()
+        self._rebuild_grid()
+        self._select_button(0)
+        self.deck.apply_profile(self.profile)
+        self._save_profile(silent=True)
+        self._set_status(f"Using blank profile: {MCP_PROFILE_NAME}", "success")
+        self._refresh_diagnostics()
+
     def _export_profile(self) -> None:
         dialog = Gtk.FileChooserNative.new("Export profile", self, Gtk.FileChooserAction.SAVE, "Export", "Cancel")
         dialog.set_current_name("streamdeck-profile.json")
@@ -574,9 +1066,9 @@ class MainWindow(Adw.ApplicationWindow):
             if file and file.get_path():
                 try:
                     save_profile(self.profile, Path(file.get_path()))
-                    self._set_status(f"Exported {file.get_path()}.")
+                    self._set_status(f"Exported {file.get_path()}.", "success")
                 except OSError as exc:
-                    self._set_status(f"Export failed: {exc}")
+                    self._set_status(f"Export failed: {exc}", "error")
         dialog.destroy()
 
     def _show_diagnostics(self) -> None:
@@ -622,12 +1114,12 @@ class MainWindow(Adw.ApplicationWindow):
         self.diagnostics_view = None
         return False
 
-    def _load_profile(self) -> Profile:
+    def _load_profile(self) -> tuple[str, Profile]:
         try:
-            return load_profile()
+            return load_active_profile()
         except (OSError, json.JSONDecodeError, ValueError) as exc:
             self.startup_message = f"Could not load saved profile: {exc}"
-            return Profile()
+            return "default", Profile()
 
     def _push_undo(self) -> None:
         snapshot = self.profile.to_dict()
@@ -663,15 +1155,22 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _save_profile(self, silent: bool) -> bool:
         try:
-            save_profile(self.profile)
+            save_profile_by_id(self.profile_id, self.profile)
+            save_active_profile_id(self.profile_id)
             return True
         except OSError as exc:
             if not silent:
                 self._set_status(f"Could not save profile: {exc}")
             return False
 
-    def _set_status(self, message: str) -> bool:
+    def _set_status(self, message: str, tone: str = "") -> bool:
         self._log(f"status {message}")
+        self.status_label.remove_css_class("status-success")
+        self.status_label.remove_css_class("status-error")
+        if tone == "success":
+            self.status_label.add_css_class("status-success")
+        elif tone == "error":
+            self.status_label.add_css_class("status-error")
         self.status_label.set_text(message)
         return False
 
@@ -716,6 +1215,7 @@ class MainWindow(Adw.ApplicationWindow):
         lines = [
             f"Device: {self.device_label.get_text() if hasattr(self, 'device_label') else 'Unknown'}",
             f"Profile: {self.profile.name}",
+            f"Profile ID: {self.profile_id}",
             f"Layout: {self.profile.rows} x {self.profile.columns} ({self.profile.button_count()} buttons)",
             f"Page: {page_name}",
             f"Page ID: {page_id}",
@@ -769,6 +1269,17 @@ class MainWindow(Adw.ApplicationWindow):
             box.append(button)
         menu.popup()
 
+    def _profile_id_for_import(self, name: str) -> str:
+        base = name.lower().replace(" ", "-") or "imported"
+        profile_id = "".join(char for char in base if char.isalnum() or char == "-").strip("-") or "imported"
+        existing = set(list_profile_ids())
+        if profile_id not in existing or profile_id == self.profile_id:
+            return profile_id
+        suffix = 2
+        while f"{profile_id}-{suffix}" in existing:
+            suffix += 1
+        return f"{profile_id}-{suffix}"
+
     def _copy_text(self, text: str) -> None:
         if _copy_text_with_cli(text):
             return
@@ -801,33 +1312,76 @@ class MainWindow(Adw.ApplicationWindow):
         provider.load_from_data(
             b"""
             .top-toolbar {
-                padding: 10px 12px;
+                padding: 6px 8px;
                 background-color: #1e293b;
-                border-radius: 8px;
+                border-radius: 7px;
                 border: 1px solid #0f172a;
             }
             .toolbar-group {
-                padding: 4px;
+                padding: 1px;
                 background-color: #334155;
-                border-radius: 8px;
+                border-radius: 7px;
                 border: 1px solid #475569;
             }
             .toolbar-button {
-                min-width: 36px;
+                min-width: 43px;
                 min-height: 32px;
-                padding: 4px 10px;
-                background-color: #f8fafc;
-                color: #0f172a;
-                border: 1px solid #94a3b8;
-                border-radius: 6px;
+                padding: 0;
+                background-color: #475569;
+                color: #f8fafc;
+                border: 1px solid #64748b;
+                border-radius: 5px;
+                -gtk-icon-size: 20px;
             }
-            .toolbar-button:hover { background-color: #e2e8f0; }
-            .device-label { font-weight: 700; font-size: 15px; color: #f8fafc; }
+            .toolbar-button label {
+                color: #f8fafc;
+                font-weight: 700;
+                font-size: 13px;
+            }
+            .toolbar-button .file-button-label {
+                color: #f8fafc;
+                font-weight: 700;
+            }
+            .file-button {
+                min-width: 43px;
+                min-height: 32px;
+            }
+            .toolbar-button:hover { background-color: #64748b; }
+            .toolbar-button:active {
+                background-color: #334155;
+                border-color: #94a3b8;
+                box-shadow: inset 0 2px 4px rgba(15, 23, 42, 0.25);
+                transform: translateY(1px);
+            }
+            .device-label { font-weight: 700; font-size: 13px; color: #f8fafc; }
             .top-toolbar label { color: #f8fafc; }
-            .status-label { padding: 8px 16px; color: #475569; }
-            .key-button { border-radius: 8px; padding: 0; }
+            .status-label {
+                min-height: 18px;
+                padding: 2px 10px;
+                color: #1e293b;
+                background-color: #f8fafc;
+                border-top: 1px solid #cbd5e1;
+                font-weight: 600;
+                font-size: 12px;
+            }
+            .status-label.status-success {
+                color: #064e3b;
+                background-color: #d1fae5;
+                border-top-color: #10b981;
+            }
+            .status-label.status-error {
+                color: #7f1d1d;
+                background-color: #fee2e2;
+                border-top-color: #ef4444;
+            }
+            .key-button { border-radius: 7px; padding: 0; }
             .key-button.selected { border: 2px solid #0f766e; background: #ecfdf5; }
-            .key-label { font-weight: 600; }
+            .key-button.drag-source { opacity: 0.55; }
+            .key-button.drop-target {
+                border: 2px solid #2563eb;
+                background: #eff6ff;
+            }
+            .key-label { font-weight: 600; font-size: 12px; }
             """
         )
         Gtk.StyleContext.add_provider_for_display(
@@ -838,12 +1392,18 @@ class MainWindow(Adw.ApplicationWindow):
 
 
 def _pixbuf_from_pil(image) -> GdkPixbuf.Pixbuf:
-    buffer = BytesIO()
-    image.save(buffer, format="PNG")
-    loader = GdkPixbuf.PixbufLoader.new_with_type("png")
-    loader.write(buffer.getvalue())
-    loader.close()
-    return loader.get_pixbuf()
+    image = image.convert("RGBA")
+    width, height = image.size
+    data = GLib.Bytes.new(image.tobytes())
+    return GdkPixbuf.Pixbuf.new_from_bytes(
+        data,
+        GdkPixbuf.Colorspace.RGB,
+        True,
+        8,
+        width,
+        height,
+        width * 4,
+    )
 
 
 def _rgba_to_hex(rgba: Gdk.RGBA) -> str:
@@ -887,11 +1447,29 @@ def _helper_status() -> list[str]:
     return helpers
 
 
+def _tray_indicator_available() -> bool:
+    try:
+        result = subprocess.run(
+            [sys.executable, "-m", "streamdeck_studio.tray_indicator", "--check"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=2,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return result.returncode == 0
+
+
 def run() -> int:
-    app = Adw.Application(application_id="dev.local.StreamDeckStudio")
+    app = Adw.Application(application_id="dev.local.CozmikStudio")
 
     def activate(application: Adw.Application) -> None:
+        for window in application.get_windows():
+            if isinstance(window, MainWindow):
+                window._show_from_tray()
+                return
         window = MainWindow(application)
+        window.set_icon_name("cozmik-studio")
         window.present()
 
     app.connect("activate", activate)

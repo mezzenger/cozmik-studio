@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import lru_cache
 import configparser
 import re
 import shutil
@@ -8,13 +9,14 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 
-from .model import config_dir, load_profile
+from .model import config_dir, load_profile, profile_action_icons_dir
 
 
 @dataclass(frozen=True)
 class ActionIcon:
     name: str
     path: Path
+    group: str = "Other"
 
 
 _ICON_SPECS = (
@@ -64,12 +66,15 @@ _ICON_SPECS = (
 )
 
 
-def action_icons() -> list[ActionIcon]:
+def action_icons(profile_id: str | None = None) -> list[ActionIcon]:
     root = config_dir() / "action-icons"
     _ensure_builtin_icons(root / "built-in")
     _ensure_main_page_icons(root / "main")
     _ensure_app_icons(root / "apps")
-    return [*_collect_resource_icons(), *_collect_icons(root)]
+    icons = [*_collect_resource_icons(), *_collect_icons(root)]
+    if profile_id:
+        icons.extend(_collect_user_installed_icons(profile_action_icons_dir(profile_id)))
+    return icons
 
 
 def _ensure_builtin_icons(directory: Path) -> None:
@@ -122,11 +127,15 @@ def _ensure_app_icons(directory: Path) -> None:
 
 def _collect_icons(root: Path) -> list[ActionIcon]:
     icons: list[ActionIcon] = []
-    for directory in (root / "built-in", root / "main", root / "apps"):
+    groups = {
+        "built-in": "Simple",
+        "apps": "Installed Apps",
+    }
+    for directory in (root / "built-in", root / "apps"):
         if not directory.exists():
             continue
         for path in _image_files(directory):
-            icons.append(ActionIcon(name=_display_name(path.stem), path=path))
+            icons.append(ActionIcon(name=_display_name(path.stem), path=path, group=groups.get(directory.name, "Other")))
     return icons
 
 
@@ -134,13 +143,58 @@ def _collect_resource_icons() -> list[ActionIcon]:
     directory = Path(__file__).parent / "resources" / "action-images"
     if not directory.exists():
         return []
-    return [ActionIcon(name=_display_name(path.stem), path=path) for path in _image_files(directory)]
+    icons: list[ActionIcon] = []
+    default_directory = directory / "default"
+    if default_directory.exists():
+        icons.extend(ActionIcon(name=_display_name(path.stem), path=path, group="Default") for path in _image_files(default_directory))
+    icons.extend(ActionIcon(name=_display_name(path.stem), path=path, group="Elgato") for path in _image_files(directory))
+    for child in sorted(path for path in directory.iterdir() if path.is_dir() and path.name != "default"):
+        icons.extend(_resource_child_icons(child))
+    return icons
 
 
-def _image_files(directory: Path) -> list[Path]:
+def _resource_child_icons(directory: Path) -> list[ActionIcon]:
+    if directory.name == "obs_studio":
+        app_name = _display_name(directory.name)
+        return [
+            ActionIcon(name=f"{app_name} {_display_name(path.stem)}", path=path, group=_obs_studio_icon_group(path))
+            for path in _image_files(directory, recursive=True)
+        ]
+    prefix = _display_name(directory.name)
+    group = re.sub(r"^Set \d+ ", "", prefix)
+    return [
+        ActionIcon(name=f"{prefix} {_display_name(path.stem)}", path=path, group=_resource_icon_group(path, group))
+        for path in _image_files(directory, recursive=True)
+    ]
+
+
+def _obs_studio_icon_group(path: Path) -> str:
+    group = _display_name(path.stem)
+    if group in {"Metallic", "Minimal"}:
+        return "Installed Apps"
+    return group
+
+
+def _resource_icon_group(path: Path, design_group: str) -> str:
+    if path.parent.name == "stream_deck_core":
+        return "Elgato"
+    return design_group
+
+
+def _collect_user_installed_icons(directory: Path) -> list[ActionIcon]:
+    if not directory.exists():
+        return []
+    return [
+        ActionIcon(name=_display_name(path.stem), path=path, group="User Installed")
+        for path in _image_files(directory)
+    ]
+
+
+def _image_files(directory: Path, recursive: bool = False) -> list[Path]:
+    paths = directory.rglob("*") if recursive else directory.iterdir()
     return sorted(
         path
-        for path in directory.iterdir()
+        for path in paths
         if path.is_file() and path.suffix.lower() in {".png", ".jpg", ".jpeg", ".gif"}
     )
 
@@ -172,6 +226,7 @@ def _desktop_files() -> list[Path]:
     return files
 
 
+@lru_cache(maxsize=512)
 def _read_desktop_file(path: Path) -> dict[str, str]:
     parser = configparser.ConfigParser(interpolation=None, strict=False)
     try:
@@ -195,12 +250,10 @@ def _resolve_icon(icon_name: str) -> Path | None:
     names = [icon_name]
     if not Path(icon_name).suffix:
         names.extend(f"{icon_name}{suffix}" for suffix in (".png", ".jpg", ".jpeg"))
+    icon_index = _icon_index()
     matches: list[Path] = []
-    for root in _icon_roots():
-        if not root.exists():
-            continue
-        for name in names:
-            matches.extend(root.rglob(name))
+    for name in names:
+        matches.extend(icon_index.get(name, []))
     matches = [path for path in matches if path.suffix.lower() in {".png", ".jpg", ".jpeg"}]
     return _best_icon_match(matches)
 
@@ -213,6 +266,23 @@ def _icon_roots() -> list[Path]:
         Path("/usr/share/icons"),
         Path("/usr/share/pixmaps"),
     ]
+
+
+@lru_cache(maxsize=1)
+def _icon_index() -> dict[str, list[Path]]:
+    index: dict[str, list[Path]] = {}
+    for root in _icon_roots():
+        if not root.exists():
+            continue
+        try:
+            paths = root.rglob("*")
+            for path in paths:
+                if not path.is_file() or path.suffix.lower() not in {".png", ".jpg", ".jpeg"}:
+                    continue
+                index.setdefault(path.name, []).append(path)
+        except OSError:
+            continue
+    return index
 
 
 def _best_icon_match(matches: list[Path]) -> Path | None:

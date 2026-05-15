@@ -89,3 +89,17 @@ def test_blank_title_and_subtitle_stay_blank(monkeypatch):
     render_button_image(ButtonConfig(label="", action_type="url", subtitle=""), (144, 144))
 
     assert drawn == []
+
+
+def test_label_position_controls_text_y(monkeypatch):
+    positions = {}
+
+    def record_text(_draw, text, y, _width, _font, _fill):
+        positions[text] = y
+
+    monkeypatch.setattr("streamdeck_studio.images._draw_centered_text", record_text)
+
+    for position in ("top", "middle", "bottom"):
+        render_button_image(ButtonConfig(label=position, label_position=position), (144, 144))
+
+    assert positions["top"] < positions["middle"] < positions["bottom"]

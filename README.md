@@ -1,15 +1,19 @@
-# Stream Deck Studio
+# Cozmik Studio
+
+![Cozmik Studio logo](Images/Cozmik_Studio_banner.png)
 
 A GNOME/GTK desktop app for assigning Stream Deck buttons to launcher actions.
 
 Current capabilities:
 
 - Detect and connect to the first attached Stream Deck.
+- Choose between saved profiles from the top toolbar.
 - Edit button label, subtitle, colors, and action type.
 - Generate button images and apply them to the device.
 - Run launchers from a physical key release or the app's Run button.
 - Import native JSON profiles and best-effort Elgato `.streamDeckProfile` or `.StreamDeckProfilesBackup` exports.
-- Save the active profile to `~/.config/streamdeck-studio/profile.json`.
+- Save profiles under `~/.config/streamdeck-studio/profiles/`.
+- Create a blank `MCP Deck` profile and expose its buttons through a local MCP server.
 
 Supported launcher actions:
 
@@ -25,11 +29,25 @@ Run it from this checkout:
 python3 -m streamdeck_studio
 ```
 
+## MCP Deck
+
+Press `MCP` in the toolbar to create and switch to a blank profile named `MCP Deck`. Configure buttons in that profile the same way as any other deck.
+
+Run the MCP server for an AI agent with:
+
+```bash
+cozmik-studio-mcp
+```
+
+The server exposes `get_profile`, `list_buttons`, and `activate_button`. `activate_button` uses 1-based button numbers and runs the configured action from the saved `MCP Deck` profile.
+
 Install a user-local command and desktop launcher:
 
 ```bash
 ./scripts/install-user.sh
 ```
+
+The installer also registers the Cozmik Studio desktop icon from `Images/Cozmik_Studio_icon.png` through `packaging/icons/cozmik-studio.png`. The installed launcher is named `dev.local.CozmikStudio.desktop` so GNOME can match the running app to its icon.
 
 If the device is not accessible, the app still opens as an offline editor. On Linux, Stream Deck access usually requires the current user to have permission to the HID device through udev rules.
 
@@ -65,7 +83,7 @@ For a single profile on the Mac:
 3. Choose `Edit Profiles`.
 4. Right-click the profile and choose `Export`.
 5. Move the resulting `.streamDeckProfile` file to this Linux machine.
-6. In Stream Deck Studio, press `Import` and select that file.
+6. In Cozmik Studio, press `Import` and select that file.
 
 For all profiles on the Mac:
 
@@ -73,6 +91,6 @@ For all profiles on the Mac:
 2. Go to the `Profiles` tab.
 3. Use `Backup All` -> `Create Backup...`.
 4. Move the `.StreamDeckProfilesBackup` file to this Linux machine.
-5. In Stream Deck Studio, press `Import` and select that file.
+5. In Cozmik Studio, press `Import` and select that file.
 
 The importer maps basic URL, file/open, and text actions. Plugin-specific actions, hotkeys, multi-actions, scripts, and linked external assets may need to be recreated or adjusted on Linux.

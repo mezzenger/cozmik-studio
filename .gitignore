@@ -11,3 +11,13 @@ build/
 .venv/
 venv/
 *.log
+
+# Local Stream Deck runtime data and ad-hoc profile exports.
+.config/
+streamdeck-studio/
+profile.json
+profiles/
+assets/
+action-icons/
+streamdeck-profile*.json
+*profile-export*.json

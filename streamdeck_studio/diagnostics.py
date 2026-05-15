@@ -92,7 +92,7 @@ def _button_issues(profile: Profile, page_name: str, index: int, config: ButtonC
             issues.append(_issue(page_name, index, config, "page action has no target"))
         elif target not in PAGE_SENTINELS and target not in profile.pages:
             issues.append(_issue(page_name, index, config, f"page target is missing: {target}"))
-    elif config.action_type in {"command", "shell", "url", "file", "text", "media", "shortcut"} and not target:
+    elif config.action_type in {"command", "shell", "url", "file", "text", "media", "shortcut", "keys"} and not target:
         issues.append(_issue(page_name, index, config, f"{config.action_type} action has no target"))
 
     if config.action_type == "file" and target:

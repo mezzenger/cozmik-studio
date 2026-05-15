@@ -1,7 +1,8 @@
 [Desktop Entry]
 Type=Application
-Name=Stream Deck Studio
+Name=Cozmik Studio
 Comment=Program Stream Deck buttons and launcher actions
-Exec=streamdeck-studio
+Exec=cozmik-studio
+Icon=cozmik-studio
 Terminal=false
 Categories=Utility;Settings;
