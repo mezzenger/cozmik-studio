@@ -734,20 +734,37 @@ def _configure_tutorial_page(profile: Profile) -> None:
             page_id="tutorials",
         )
     if button_count:
-        profile.set_button(
-            button_count - 1,
-            ButtonConfig(
-                label="Home",
-                subtitle="MAIN",
-                action_type="page",
-                target="main",
-                background="#123c69",
-                foreground="#ffffff",
-                action_image_path=str(_resource_action_icon_path("default", "home.png")),
-                label_position="bottom",
-            ),
-            page_id="tutorials",
-        )
+        _set_tutorial_home_button(profile)
+
+
+def ensure_tutorial_home_button(profile: Profile) -> bool:
+    if "tutorials" not in profile.pages or "main" not in profile.pages:
+        return False
+    index = profile.button_count() - 1
+    if index < 0:
+        return False
+    current = profile.get_button(index, "tutorials")
+    if current.action_type == "page" and current.target == "main":
+        return False
+    _set_tutorial_home_button(profile)
+    return True
+
+
+def _set_tutorial_home_button(profile: Profile) -> None:
+    profile.set_button(
+        profile.button_count() - 1,
+        ButtonConfig(
+            label="Home",
+            subtitle="MAIN",
+            action_type="page",
+            target="main",
+            background="#123c69",
+            foreground="#ffffff",
+            action_image_path=str(_resource_action_icon_path("default", "home.png")),
+            label_position="bottom",
+        ),
+        page_id="tutorials",
+    )
 
 
 def _tutorial_target(slides: Any) -> str:

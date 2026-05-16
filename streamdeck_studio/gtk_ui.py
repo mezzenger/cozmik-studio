@@ -40,6 +40,7 @@ from .model import (
     config_dir,
     create_default_icon_profile,
     delete_profile_by_id,
+    ensure_tutorial_home_button,
     ensure_mcp_profile,
     list_profile_ids,
     load_active_profile,
@@ -1037,14 +1038,14 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _show_tutorial_slideshow(self, title: str, subtitle: str, slides: list[dict[str, str]]) -> None:
         window = Gtk.Window(title=title, transient_for=self, modal=True)
-        window.set_default_size(560, 420)
+        window.set_default_size(620, 480)
         window.add_css_class("tutorial-window")
 
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
-        root.set_margin_top(18)
-        root.set_margin_bottom(16)
-        root.set_margin_start(18)
-        root.set_margin_end(18)
+        root.set_margin_top(22)
+        root.set_margin_bottom(20)
+        root.set_margin_start(22)
+        root.set_margin_end(22)
         window.set_child(root)
 
         header = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=3)
@@ -1059,17 +1060,17 @@ class MainWindow(Adw.ApplicationWindow):
 
         stack = Gtk.Stack()
         stack.set_vexpand(True)
-        stack.set_transition_type(Gtk.StackTransitionType.SLIDE_LEFT_RIGHT)
-        stack.set_transition_duration(260)
+        stack.set_transition_type(getattr(Gtk.StackTransitionType, "OVER_LEFT_RIGHT", Gtk.StackTransitionType.SLIDE_LEFT_RIGHT))
+        stack.set_transition_duration(380)
         root.append(stack)
 
         for index, slide in enumerate(slides):
             page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14)
             page.add_css_class("tutorial-slide")
-            page.set_margin_top(18)
-            page.set_margin_bottom(18)
-            page.set_margin_start(18)
-            page.set_margin_end(18)
+            page.set_margin_top(24)
+            page.set_margin_bottom(24)
+            page.set_margin_start(28)
+            page.set_margin_end(28)
             slide_title = Gtk.Label(label=slide["title"], xalign=0)
             slide_title.add_css_class("tutorial-slide-title")
             slide_title.set_wrap(True)
@@ -1083,6 +1084,11 @@ class MainWindow(Adw.ApplicationWindow):
 
         progress = Gtk.ProgressBar()
         root.append(progress)
+
+        selector = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        selector.set_halign(Gtk.Align.CENTER)
+        selector.add_css_class("tutorial-selector")
+        root.append(selector)
 
         footer = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         counter = Gtk.Label(xalign=0)
@@ -1098,6 +1104,7 @@ class MainWindow(Adw.ApplicationWindow):
         root.append(footer)
 
         state = {"index": 0, "timer": 0}
+        selector_buttons: list[Gtk.Button] = []
 
         def update() -> None:
             current = int(state["index"])
@@ -1106,9 +1113,18 @@ class MainWindow(Adw.ApplicationWindow):
             progress.set_fraction((current + 1) / len(slides))
             previous.set_sensitive(current > 0)
             next_button.set_label("Replay" if current == len(slides) - 1 else "Next")
+            for index, button in enumerate(selector_buttons):
+                if index == current:
+                    button.add_css_class("selected")
+                else:
+                    button.remove_css_class("selected")
 
         def set_index(index: int) -> None:
-            state["index"] = max(0, min(index, len(slides) - 1))
+            previous_index = int(state["index"])
+            next_index = max(0, min(index, len(slides) - 1))
+            transition = "OVER_LEFT_RIGHT" if next_index >= previous_index else "OVER_RIGHT_LEFT"
+            stack.set_transition_type(getattr(Gtk.StackTransitionType, transition, Gtk.StackTransitionType.SLIDE_LEFT_RIGHT))
+            state["index"] = next_index
             update()
 
         def advance() -> bool:
@@ -1123,6 +1139,14 @@ class MainWindow(Adw.ApplicationWindow):
             if timer_id:
                 GLib.source_remove(timer_id)
                 state["timer"] = 0
+
+        for index in range(len(slides)):
+            button = Gtk.Button(label=str(index + 1))
+            button.add_css_class("tutorial-selector-button")
+            button.set_tooltip_text(f"Show slide {index + 1}")
+            button.connect("clicked", lambda *_args, slide_index=index: set_index(slide_index))
+            selector.append(button)
+            selector_buttons.append(button)
 
         previous.connect("clicked", lambda *_args: set_index(int(state["index"]) - 1))
         next_button.connect("clicked", lambda *_args: set_index(0 if int(state["index"]) == len(slides) - 1 else int(state["index"]) + 1))
@@ -1352,6 +1376,7 @@ class MainWindow(Adw.ApplicationWindow):
         if page_id not in self.profile.pages:
             self._set_status("Page target is not available.")
             return
+        repaired = page_id == "tutorials" and ensure_tutorial_home_button(self.profile)
         self.profile.set_current_page(page_id)
         self._log(f"switch page={page_id} name={self.profile.page_names.get(page_id, page_id)!r}")
         self._refresh_page_combo()
@@ -1359,7 +1384,8 @@ class MainWindow(Adw.ApplicationWindow):
         self._select_button(0)
         self.deck.apply_profile(self.profile)
         self._save_profile(silent=True)
-        self._set_status(f"Page: {self.profile.page_names.get(page_id, page_id)}")
+        suffix = " (Home button added)" if repaired else ""
+        self._set_status(f"Page: {self.profile.page_names.get(page_id, page_id)}{suffix}")
         self._refresh_diagnostics()
 
     def _refresh_diagnostics(self) -> None:
@@ -1557,6 +1583,7 @@ class MainWindow(Adw.ApplicationWindow):
                 background: #ffffff;
                 border: 1px solid #cbd5e1;
                 border-radius: 8px;
+                box-shadow: 0 10px 24px rgba(15, 23, 42, 0.12);
             }
             .tutorial-slide-title {
                 color: #123c69;
@@ -1567,6 +1594,29 @@ class MainWindow(Adw.ApplicationWindow):
                 color: #1e293b;
                 font-size: 15px;
                 line-height: 1.35;
+            }
+            .tutorial-selector {
+                padding: 2px 0;
+            }
+            .tutorial-selector-button {
+                min-width: 30px;
+                min-height: 28px;
+                padding: 0;
+                border-radius: 999px;
+                font-weight: 800;
+                font-size: 12px;
+                color: #475569;
+                background: #e2e8f0;
+                border: 1px solid #cbd5e1;
+            }
+            .tutorial-selector-button:hover {
+                color: #0f172a;
+                background: #cbd5e1;
+            }
+            .tutorial-selector-button.selected {
+                color: #ffffff;
+                background: #0f766e;
+                border-color: #0f766e;
             }
             .tutorial-counter {
                 color: #475569;

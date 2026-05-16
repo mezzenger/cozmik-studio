@@ -5,6 +5,7 @@ from streamdeck_studio.model import (
     Profile,
     TUTORIAL_TARGET_PREFIX,
     create_default_icon_profile,
+    ensure_tutorial_home_button,
     ensure_mcp_profile,
     list_profile_ids,
     load_active_profile,
@@ -156,6 +157,17 @@ def test_default_tutorial_page_contains_readable_explainers():
         assert button.target.startswith(TUTORIAL_TARGET_PREFIX)
         assert button.action_image_path.endswith(".png")
     assert profile.get_button(14, "tutorials").action_type == "page"
+
+
+def test_ensure_tutorial_home_button_repairs_existing_tutorial_page():
+    profile = create_default_icon_profile("New Profile", rows=3, columns=5)
+    profile.set_button(14, ButtonConfig(label="Workflow", action_type="tutorial", target="cozmik-tutorial:[]"), "tutorials")
+
+    assert ensure_tutorial_home_button(profile) is True
+    assert profile.get_button(14, "tutorials").label == "Home"
+    assert profile.get_button(14, "tutorials").action_type == "page"
+    assert profile.get_button(14, "tutorials").target == "main"
+    assert ensure_tutorial_home_button(profile) is False
 
 
 def test_mcp_profile_edits_persist_after_activation(tmp_path, monkeypatch):
