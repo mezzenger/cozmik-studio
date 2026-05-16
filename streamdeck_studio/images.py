@@ -89,10 +89,10 @@ def _draw_action_icon(image: Image.Image, path_value: str, size: tuple[int, int]
         icon = _image_frame(path, frame_index).convert("RGBA")
     except OSError:
         return 0
-    max_size = int(min(size) * (0.82 if has_text else 0.92))
+    max_size = int(min(size) * (0.56 if has_text else 0.92))
     icon = _contain_image(icon, (max_size, max_size))
     x = (size[0] - icon.width) // 2
-    y = (size[1] - icon.height) // 2
+    y = max(8, int(size[1] * 0.10)) if has_text else (size[1] - icon.height) // 2
     base = image.convert("RGBA")
     base.alpha_composite(icon, (x, y))
     image.paste(base.convert("RGB"))

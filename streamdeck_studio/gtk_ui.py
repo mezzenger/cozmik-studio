@@ -36,6 +36,7 @@ from .model import (
     MCP_PROFILE_NAME,
     NEW_PROFILE_NAME,
     Profile,
+    TUTORIAL_TARGET_PREFIX,
     config_dir,
     create_default_icon_profile,
     delete_profile_by_id,
@@ -931,6 +932,11 @@ class MainWindow(Adw.ApplicationWindow):
         try:
             config = self.profile.get_button(index)
             self._log(f"release key={index} label={config.label!r} action={config.action_type} target={redact_target(config)!r}")
+            if self._show_tutorial_if_needed(config):
+                self._last_action = f"release key={index}: opened tutorial {config.label!r}"
+                self._set_status(f"Tutorial: {config.label}", "success")
+                self._refresh_diagnostics()
+                return False
             if config.action_type == "text":
                 message = paste_text_action(config, paste=self._paste)
                 self._last_action = f"release key={index}: {message}"
@@ -958,7 +964,11 @@ class MainWindow(Adw.ApplicationWindow):
         try:
             config = self.profile.get_button(index)
             self._log(f"press key={index} label={config.label!r} action={config.action_type} target={redact_target(config)!r}")
-            if config.action_type == "text":
+            if self._show_tutorial_if_needed(config):
+                self._suppress_release.add(index)
+                self._last_action = f"press key={index}: opened tutorial {config.label!r}"
+                self._set_status(f"Tutorial: {config.label}", "success")
+            elif config.action_type == "text":
                 message = copy_text_action(config, copy_text=self._copy_text)
                 self._last_action = f"press key={index}: {message}"
                 self._set_status(message)
@@ -974,6 +984,128 @@ class MainWindow(Adw.ApplicationWindow):
             self._set_status(f"Action failed: {exc}")
         self._refresh_diagnostics()
         return False
+
+    def _show_tutorial_if_needed(self, config: Any) -> bool:
+        if config.action_type != "text" or not config.target.startswith(TUTORIAL_TARGET_PREFIX):
+            return False
+        try:
+            slides = json.loads(config.target[len(TUTORIAL_TARGET_PREFIX) :])
+        except json.JSONDecodeError as exc:
+            self._set_status(f"Tutorial is not readable: {exc}", "error")
+            return True
+        if not isinstance(slides, list) or not slides:
+            self._set_status("Tutorial has no slides.", "error")
+            return True
+        normalized = []
+        for slide in slides:
+            if not isinstance(slide, dict):
+                continue
+            title = str(slide.get("title", "")).strip()
+            body = str(slide.get("body", "")).strip()
+            if title or body:
+                normalized.append({"title": title or config.label, "body": body})
+        if not normalized:
+            self._set_status("Tutorial has no readable slides.", "error")
+            return True
+        self._show_tutorial_slideshow(config.label or "Tutorial", config.subtitle, normalized)
+        return True
+
+    def _show_tutorial_slideshow(self, title: str, subtitle: str, slides: list[dict[str, str]]) -> None:
+        window = Gtk.Window(title=title, transient_for=self, modal=True)
+        window.set_default_size(560, 420)
+        window.add_css_class("tutorial-window")
+
+        root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        root.set_margin_top(18)
+        root.set_margin_bottom(16)
+        root.set_margin_start(18)
+        root.set_margin_end(18)
+        window.set_child(root)
+
+        header = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=3)
+        eyebrow = Gtk.Label(label=subtitle or "TUTORIAL", xalign=0)
+        eyebrow.add_css_class("tutorial-eyebrow")
+        header.append(eyebrow)
+        heading = Gtk.Label(label=title, xalign=0)
+        heading.add_css_class("tutorial-heading")
+        heading.set_wrap(True)
+        header.append(heading)
+        root.append(header)
+
+        stack = Gtk.Stack()
+        stack.set_vexpand(True)
+        stack.set_transition_type(Gtk.StackTransitionType.SLIDE_LEFT_RIGHT)
+        stack.set_transition_duration(260)
+        root.append(stack)
+
+        for index, slide in enumerate(slides):
+            page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14)
+            page.add_css_class("tutorial-slide")
+            page.set_margin_top(18)
+            page.set_margin_bottom(18)
+            page.set_margin_start(18)
+            page.set_margin_end(18)
+            slide_title = Gtk.Label(label=slide["title"], xalign=0)
+            slide_title.add_css_class("tutorial-slide-title")
+            slide_title.set_wrap(True)
+            body = Gtk.Label(label=slide["body"], xalign=0)
+            body.add_css_class("tutorial-slide-body")
+            body.set_wrap(True)
+            body.set_vexpand(True)
+            page.append(slide_title)
+            page.append(body)
+            stack.add_named(page, str(index))
+
+        progress = Gtk.ProgressBar()
+        root.append(progress)
+
+        footer = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        counter = Gtk.Label(xalign=0)
+        counter.set_hexpand(True)
+        counter.add_css_class("tutorial-counter")
+        previous = Gtk.Button(label="Previous")
+        next_button = Gtk.Button(label="Next")
+        close = Gtk.Button(label="Close")
+        footer.append(counter)
+        footer.append(previous)
+        footer.append(next_button)
+        footer.append(close)
+        root.append(footer)
+
+        state = {"index": 0, "timer": 0}
+
+        def update() -> None:
+            current = int(state["index"])
+            stack.set_visible_child_name(str(current))
+            counter.set_text(f"Slide {current + 1} of {len(slides)}")
+            progress.set_fraction((current + 1) / len(slides))
+            previous.set_sensitive(current > 0)
+            next_button.set_label("Replay" if current == len(slides) - 1 else "Next")
+
+        def set_index(index: int) -> None:
+            state["index"] = max(0, min(index, len(slides) - 1))
+            update()
+
+        def advance() -> bool:
+            current = int(state["index"])
+            if current >= len(slides) - 1:
+                return True
+            set_index(current + 1)
+            return True
+
+        def stop_timer() -> None:
+            timer_id = int(state.get("timer", 0))
+            if timer_id:
+                GLib.source_remove(timer_id)
+                state["timer"] = 0
+
+        previous.connect("clicked", lambda *_args: set_index(int(state["index"]) - 1))
+        next_button.connect("clicked", lambda *_args: set_index(0 if int(state["index"]) == len(slides) - 1 else int(state["index"]) + 1))
+        close.connect("clicked", lambda *_args: window.close())
+        window.connect("close-request", lambda *_args: (stop_timer(), False)[1])
+        state["timer"] = GLib.timeout_add_seconds(7, advance)
+        update()
+        window.present()
 
     def _log_key_event(self, index: int, pressed: bool) -> bool:
         self._last_key_event = f"key={index} state={'pressed' if pressed else 'released'}"
@@ -1382,6 +1514,40 @@ class MainWindow(Adw.ApplicationWindow):
                 background: #eff6ff;
             }
             .key-label { font-weight: 600; font-size: 12px; }
+            .tutorial-window {
+                background: #f8fafc;
+            }
+            .tutorial-eyebrow {
+                color: #0f766e;
+                font-size: 12px;
+                font-weight: 800;
+                letter-spacing: 0;
+            }
+            .tutorial-heading {
+                color: #0f172a;
+                font-size: 25px;
+                font-weight: 800;
+            }
+            .tutorial-slide {
+                background: #ffffff;
+                border: 1px solid #cbd5e1;
+                border-radius: 8px;
+            }
+            .tutorial-slide-title {
+                color: #123c69;
+                font-size: 19px;
+                font-weight: 800;
+            }
+            .tutorial-slide-body {
+                color: #1e293b;
+                font-size: 15px;
+                line-height: 1.35;
+            }
+            .tutorial-counter {
+                color: #475569;
+                font-weight: 700;
+                font-size: 12px;
+            }
             """
         )
         Gtk.StyleContext.add_provider_for_display(

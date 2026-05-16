@@ -3,6 +3,7 @@ from streamdeck_studio.model import (
     MCP_PROFILE_ID,
     MCP_PROFILE_NAME,
     Profile,
+    TUTORIAL_TARGET_PREFIX,
     create_default_icon_profile,
     ensure_mcp_profile,
     list_profile_ids,
@@ -114,7 +115,42 @@ def test_default_icon_profile_has_main_and_tutorial_pages():
     assert len(profile.pages["main"]) == 15
     assert len(profile.pages["tutorials"]) == 15
     assert profile.get_button(0, "main").action_image_path.endswith("home.png")
-    assert profile.get_button(0, "tutorials").action_image_path.endswith("terminal.png")
+    assert profile.get_button(5, "main").label == "Tutorials"
+    assert profile.get_button(5, "main").action_type == "page"
+    assert profile.get_button(5, "main").target == "tutorials"
+    assert profile.get_button(0, "tutorials").label == "Start Here"
+    assert profile.get_button(0, "tutorials").action_type == "text"
+    assert profile.get_button(0, "tutorials").target.startswith(TUTORIAL_TARGET_PREFIX)
+    assert profile.get_button(0, "tutorials").action_image_path.endswith("start-here.png")
+
+
+def test_default_tutorial_page_contains_readable_explainers():
+    profile = create_default_icon_profile("New Profile", rows=3, columns=5)
+
+    labels = [profile.get_button(index, "tutorials").label for index in range(15)]
+
+    assert labels == [
+        "Start Here",
+        "Profiles",
+        "Pages",
+        "Buttons",
+        "Actions",
+        "Text Paste",
+        "Key Presses",
+        "Images",
+        "Import",
+        "Hardware",
+        "MCP Deck",
+        "Privacy",
+        "Backups",
+        "Fix Issues",
+        "Workflow",
+    ]
+    for index in range(15):
+        button = profile.get_button(index, "tutorials")
+        assert button.subtitle
+        assert button.target.startswith(TUTORIAL_TARGET_PREFIX)
+        assert button.action_image_path.endswith(".png")
 
 
 def test_mcp_profile_edits_persist_after_activation(tmp_path, monkeypatch):

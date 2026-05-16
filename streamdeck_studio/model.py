@@ -16,6 +16,7 @@ NEW_PROFILE_NAME = "New Profile"
 MCP_PROFILE_ID = "mcp-deck"
 MCP_PROFILE_NAME = "MCP Deck"
 DEFAULT_PROFILE_PAGES = {"main": "Main", "tutorials": "Tutorials"}
+TUTORIAL_TARGET_PREFIX = "cozmik-tutorial:"
 DEFAULT_ICON_NAMES = (
     "home",
     "folder",
@@ -47,6 +48,309 @@ DEFAULT_ICON_NAMES = (
     "volume-down",
     "mute",
     "screenshot",
+)
+
+TUTORIAL_TOPICS = (
+    {
+        "label": "Start Here",
+        "subtitle": "TOUR",
+        "icon": "start-here.png",
+        "background": "#123c69",
+        "slides": [
+            {
+                "title": "Start with a profile",
+                "body": "Cozmik Studio stores complete button layouts as profiles. Use the Profile selector in the toolbar to switch between saved layouts before editing buttons.",
+            },
+            {
+                "title": "Edit one button at a time",
+                "body": "Select a key in the grid, set its label, subtitle, action, target, colors, and images, then use Run or the physical Stream Deck to test it.",
+            },
+            {
+                "title": "Save applies to hardware",
+                "body": "Most edits autosave. The Save button is still useful as an explicit apply step when a physical deck is connected.",
+            },
+        ],
+    },
+    {
+        "label": "Profiles",
+        "subtitle": "LAYOUTS",
+        "icon": "profiles.png",
+        "background": "#0f766e",
+        "slides": [
+            {
+                "title": "Profiles are separate decks",
+                "body": "A profile contains pages, buttons, labels, images, colors, and actions. Use separate profiles for work, streaming, experiments, or a blank MCP Deck.",
+            },
+            {
+                "title": "Renaming and defaults",
+                "body": "Right-click the profile selector to rename a placeholder profile. Use the star button to make the current profile the default at startup.",
+            },
+            {
+                "title": "Connected deck layouts",
+                "body": "When hardware is connected, Cozmik matches the active profile to the physical row and column layout so every key has a usable slot.",
+            },
+        ],
+    },
+    {
+        "label": "Pages",
+        "subtitle": "NAV",
+        "icon": "pages.png",
+        "background": "#1d4ed8",
+        "slides": [
+            {
+                "title": "Pages act like folders",
+                "body": "A page is another set of buttons inside the same profile. Page buttons let you jump between topic-specific layouts without changing profiles.",
+            },
+            {
+                "title": "Create navigation first",
+                "body": "Build navigation buttons before filling every page. A clear home, previous, next, or parent path keeps large decks usable.",
+            },
+            {
+                "title": "Use the page selector",
+                "body": "The Page selector lets you edit any page directly. Selecting a page from the toolbar does not require pressing a hardware key.",
+            },
+        ],
+    },
+    {
+        "label": "Buttons",
+        "subtitle": "EDITOR",
+        "icon": "buttons.png",
+        "background": "#4f46e5",
+        "slides": [
+            {
+                "title": "Readable beats crowded",
+                "body": "Use short labels and subtitles. Put the most important word in the label, then use subtitle text for context such as APP, WEB, or KEYS.",
+            },
+            {
+                "title": "Drag to rearrange",
+                "body": "Drag a button onto another slot to swap or move configurations. Cozmik refreshes both previews and reapplies the profile.",
+            },
+            {
+                "title": "Clear without deleting pages",
+                "body": "Clear removes only the selected button configuration. Pages and other buttons remain intact.",
+            },
+        ],
+    },
+    {
+        "label": "Actions",
+        "subtitle": "RUN",
+        "icon": "actions.png",
+        "background": "#7c2d12",
+        "slides": [
+            {
+                "title": "Choose the action type first",
+                "body": "Action type controls how the Target field is interpreted. URLs open in a browser, files use desktop openers, commands start processes, and text copies or pastes content.",
+            },
+            {
+                "title": "Run before relying on it",
+                "body": "Use the Run button in the editor to test the selected action. This catches missing commands, bad paths, and unsupported helpers before you need the deck.",
+            },
+            {
+                "title": "Shell is intentionally different",
+                "body": "Use command for normal executable arguments. Use shell only when you need pipes, redirects, variables, or other shell expansion.",
+            },
+        ],
+    },
+    {
+        "label": "Text Paste",
+        "subtitle": "CLIP",
+        "icon": "text-paste.png",
+        "background": "#be123c",
+        "slides": [
+            {
+                "title": "Text actions split press and release",
+                "body": "On hardware, pressing a text key copies the configured text. Releasing it attempts to paste into the focused app.",
+            },
+            {
+                "title": "Wayland needs a helper",
+                "body": "On GNOME and other Wayland sessions, paste usually needs ydotool, wtype, or xdotool. Start ydotoold if ydotool is installed but paste does not work.",
+            },
+            {
+                "title": "Sensitive text stays local",
+                "body": "Text targets can contain private snippets. Review exported profiles before sharing because exports include button targets.",
+            },
+        ],
+    },
+    {
+        "label": "Key Presses",
+        "subtitle": "KEYS",
+        "icon": "key-presses.png",
+        "background": "#6d28d9",
+        "slides": [
+            {
+                "title": "Shortcuts are chords",
+                "body": "Use shortcut for a single chord such as ctrl+alt+t. It presses and releases the whole combination as one action.",
+            },
+            {
+                "title": "Keys can be scripted",
+                "body": "Use keys for multi-step sequences such as alt+delay+F4,f. Commas separate taps; delay pauses between steps.",
+            },
+            {
+                "title": "Fallback helpers",
+                "body": "Cozmik tries ydotool first for key scripts. If ydotool is installed but unusable, it falls back to xdotool when available.",
+            },
+        ],
+    },
+    {
+        "label": "Images",
+        "subtitle": "STYLE",
+        "icon": "images.png",
+        "background": "#b45309",
+        "slides": [
+            {
+                "title": "Use action images for symbols",
+                "body": "Action images sit over the button background and are best for app icons, arrows, media symbols, and topic markers.",
+            },
+            {
+                "title": "Use background images sparingly",
+                "body": "Background images fill the entire key. Cozmik adds a dark overlay so labels remain readable.",
+            },
+            {
+                "title": "Bundled galleries are portable",
+                "body": "Bundled icons travel with the app. User-installed icons are copied into your local profile assets and should be reviewed before sharing.",
+            },
+        ],
+    },
+    {
+        "label": "Import",
+        "subtitle": "MAC",
+        "icon": "import.png",
+        "background": "#0369a1",
+        "slides": [
+            {
+                "title": "Import Elgato exports",
+                "body": "Use Import for .streamDeckProfile files or .StreamDeckProfilesBackup archives exported from the macOS Stream Deck app.",
+            },
+            {
+                "title": "Expect best-effort mapping",
+                "body": "Cozmik maps common URL, file, text, hotkey, media, and navigation actions. Plugin-specific actions may need manual cleanup.",
+            },
+            {
+                "title": "Read diagnostics",
+                "body": "The diagnostics panel summarizes unsupported buttons, missing page links, and translated launchers so you know what to repair.",
+            },
+        ],
+    },
+    {
+        "label": "Hardware",
+        "subtitle": "DECK",
+        "icon": "hardware.png",
+        "background": "#334155",
+        "slides": [
+            {
+                "title": "Device access uses HID",
+                "body": "If Cozmik cannot open the Stream Deck, install the udev rule from packaging/udev and reconnect the device.",
+            },
+            {
+                "title": "Offline editing is normal",
+                "body": "The app works without hardware connected. You can build profiles offline and apply them later when a deck is available.",
+            },
+            {
+                "title": "Animations refresh on deck",
+                "body": "Animated GIF buttons are rendered frame by frame and applied to connected hardware while the profile is active.",
+            },
+        ],
+    },
+    {
+        "label": "MCP Deck",
+        "subtitle": "AGENTS",
+        "icon": "mcp-deck.png",
+        "background": "#0e7490",
+        "slides": [
+            {
+                "title": "MCP Deck is a separate profile",
+                "body": "Press MCP to create and switch to a blank MCP Deck profile. Configure buttons there specifically for local agent workflows.",
+            },
+            {
+                "title": "Agents get tools, not secrets",
+                "body": "The MCP server exposes get_profile, list_buttons, and activate_button. Text targets are redacted from list output, but activated buttons still run locally.",
+            },
+            {
+                "title": "Smoke-test the server",
+                "body": "Run cozmik-studio-mcp through an MCP client, or send a tools/list JSON-RPC frame to verify it returns the tool definitions.",
+            },
+        ],
+    },
+    {
+        "label": "Privacy",
+        "subtitle": "LOCAL",
+        "icon": "privacy.png",
+        "background": "#475569",
+        "slides": [
+            {
+                "title": "Profiles are local runtime data",
+                "body": "Saved profiles live under ~/.config/streamdeck-studio. They are not part of the source repository unless you intentionally copy or export them.",
+            },
+            {
+                "title": "Targets can be sensitive",
+                "body": "Targets may contain private URLs, file paths, commands, snippets, or workflow details. Sanitize exported profiles before sharing.",
+            },
+            {
+                "title": "Use separate profiles",
+                "body": "Keep public demos, daily work, and experiments in separate profiles so you can share one without exposing another.",
+            },
+        ],
+    },
+    {
+        "label": "Backups",
+        "subtitle": "SAFE",
+        "icon": "backups.png",
+        "background": "#15803d",
+        "slides": [
+            {
+                "title": "Back up before big imports",
+                "body": "Before importing large profile archives, back up ~/.config/streamdeck-studio or export the current profile.",
+            },
+            {
+                "title": "Keep backups outside git",
+                "body": "Backups often contain personal profile data. Store them outside the source tree or in ignored locations.",
+            },
+            {
+                "title": "Test restores",
+                "body": "A backup is only useful if it restores. Keep one small known-good profile export for sanity checks.",
+            },
+        ],
+    },
+    {
+        "label": "Fix Issues",
+        "subtitle": "DEBUG",
+        "icon": "fix-issues.png",
+        "background": "#991b1b",
+        "slides": [
+            {
+                "title": "Use diagnostics first",
+                "body": "Open Diagnostics to inspect the selected button, current page, device state, last hardware event, and last action result.",
+            },
+            {
+                "title": "Check helpers",
+                "body": "If paste, shortcuts, or key scripts fail, verify ydotool, wtype, or xdotool is installed and usable in your session.",
+            },
+            {
+                "title": "Check paths and permissions",
+                "body": "Failed file and command actions usually come down to missing files, non-executable commands, or device permission issues.",
+            },
+        ],
+    },
+    {
+        "label": "Workflow",
+        "subtitle": "PLAN",
+        "icon": "workflow.png",
+        "background": "#4338ca",
+        "slides": [
+            {
+                "title": "Start with structure",
+                "body": "Create pages by topic first: apps, media, links, snippets, system actions, or agent actions. Then add navigation.",
+            },
+            {
+                "title": "Make buttons scannable",
+                "body": "Use consistent colors, short labels, and recognizable icons. Similar actions should look related but not identical.",
+            },
+            {
+                "title": "Iterate on the deck",
+                "body": "Use the physical deck for a day, then move frequent actions toward the first page and demote rarely used buttons.",
+            },
+        ],
+    },
 )
 
 
@@ -385,9 +689,56 @@ def create_default_icon_profile(name: str = NEW_PROFILE_NAME, rows: int = 3, col
         start = page_index * page_size
         for index, path in enumerate(icon_paths[start : start + page_size]):
             profile.pages[page_id][str(index)] = ButtonConfig(action_image_path=str(path))
+    _configure_default_main_page(profile)
+    _configure_tutorial_page(profile)
     profile.current_page = "main"
     profile.buttons = profile.pages["main"]
     return profile
+
+
+def _configure_default_main_page(profile: Profile) -> None:
+    tutorials_icon = _tutorial_icon_path("start-here.png")
+    if 5 < profile.button_count():
+        profile.set_button(
+            5,
+            ButtonConfig(
+                label="Tutorials",
+                subtitle="GUIDE",
+                action_type="page",
+                target="tutorials",
+                background="#123c69",
+                foreground="#ffffff",
+                action_image_path=str(tutorials_icon),
+                label_position="bottom",
+            ),
+            page_id="main",
+        )
+
+
+def _configure_tutorial_page(profile: Profile) -> None:
+    for index, topic in enumerate(TUTORIAL_TOPICS[: profile.button_count()]):
+        profile.set_button(
+            index,
+            ButtonConfig(
+                label=str(topic["label"]),
+                subtitle=str(topic["subtitle"]),
+                action_type="text",
+                target=_tutorial_target(topic["slides"]),
+                background=str(topic["background"]),
+                foreground="#ffffff",
+                action_image_path=str(_tutorial_icon_path(str(topic["icon"]))),
+                label_position="bottom",
+            ),
+            page_id="tutorials",
+        )
+
+
+def _tutorial_target(slides: Any) -> str:
+    return TUTORIAL_TARGET_PREFIX + json.dumps(slides, separators=(",", ":"), ensure_ascii=True)
+
+
+def _tutorial_icon_path(name: str) -> Path:
+    return Path(__file__).parent / "resources" / "action-images" / "tutorials" / name
 
 
 def delete_profile_by_id(profile_id: str) -> None:
