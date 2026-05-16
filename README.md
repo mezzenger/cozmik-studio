@@ -51,6 +51,10 @@ The installer also registers the Cozmik Studio desktop icon from `Images/Cozmik_
 
 If the device is not accessible, the app still opens as an offline editor. On Linux, Stream Deck access usually requires the current user to have permission to the HID device through udev rules.
 
+## Profile Privacy
+
+Cozmik Studio saves runtime profiles locally under `~/.config/streamdeck-studio/`. Button targets can contain private file paths, URLs, commands, pasted text, or other sensitive values. Do not commit or share local profile JSON, exported profiles, or copied profile assets unless you have reviewed and sanitized them first.
+
 ## Device permissions
 
 If the app reports `Could not open HID device`, install the included udev rule:
