@@ -316,6 +316,7 @@ class MainWindow(Adw.ApplicationWindow):
         nav_group.append(self._icon_button("go-previous-symbolic", "Previous Page", self._previous_page))
         nav_group.append(self._icon_button("go-next-symbolic", "Next Page", self._next_page))
         nav_group.append(self._icon_button("list-add-symbolic", "New Profile", self._new_profile))
+        nav_group.append(self._icon_button("help-about-symbolic", "New Tutorial Profile", self._new_tutorial_profile))
         nav_group.append(self._icon_button("user-trash-symbolic", "Delete Profile", self._delete_current_profile))
         nav_group.append(self._icon_button("view-refresh-symbolic", "Reconnect", self._connect_deck))
         bar.append(nav_group)
@@ -669,16 +670,25 @@ class MainWindow(Adw.ApplicationWindow):
         self._set_status(f"Renamed profile: {name}", "success")
 
     def _new_profile(self) -> None:
+        self._create_default_profile(next_profile_name(), show_name_entry=True)
+
+    def _new_tutorial_profile(self) -> None:
+        name = next_profile_name("Tutorial Profile")
+        if self._create_default_profile(name, show_name_entry=False, page_id="tutorials"):
+            self._set_status(f"Tutorial profile created: {name}", "success")
+
+    def _create_default_profile(self, name: str, show_name_entry: bool, page_id: str = "main") -> bool:
         try:
             self._save_profile(silent=True)
-            name = next_profile_name()
             self.profile = create_default_icon_profile(name, self.profile.rows, self.profile.columns)
             self.profile_id = profile_id_from_name(name)
+            if page_id in self.profile.pages:
+                self.profile.set_current_page(page_id)
             save_profile_by_id(self.profile_id, self.profile)
             save_active_profile_id(self.profile_id)
         except (OSError, json.JSONDecodeError, ValueError) as exc:
             self._set_status(f"Could not create profile: {exc}", "error")
-            return
+            return False
         self._undo_stack.clear()
         self._update_undo_state()
         self._refresh_profile_combo()
@@ -686,9 +696,11 @@ class MainWindow(Adw.ApplicationWindow):
         self._rebuild_grid()
         self._select_button(0)
         self.deck.apply_profile(self.profile)
-        self._show_profile_name_entry()
-        self._set_status("New profile created. Enter a profile name.", "success")
+        if show_name_entry:
+            self._show_profile_name_entry()
+            self._set_status("New profile created. Enter a profile name.", "success")
         self._refresh_diagnostics()
+        return True
 
     def _delete_current_profile(self) -> None:
         dialog = Gtk.MessageDialog(

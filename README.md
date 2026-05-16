@@ -14,6 +14,7 @@ Current capabilities:
 - Import native JSON profiles and best-effort Elgato `.streamDeckProfile` or `.StreamDeckProfilesBackup` exports.
 - Save profiles under `~/.config/streamdeck-studio/profiles/`.
 - Create a blank `MCP Deck` profile and expose its buttons through a local MCP server.
+- Create a public-safe `Tutorial Profile` with interactive slideshow explainers for common setup and troubleshooting topics.
 
 Supported launcher actions:
 
@@ -40,6 +41,10 @@ cozmik-studio-mcp
 ```
 
 The server exposes `get_profile`, `list_buttons`, and `activate_button`. `activate_button` uses 1-based button numbers and runs the configured action from the saved `MCP Deck` profile.
+
+## Tutorial Profile
+
+Use the `New Tutorial Profile` toolbar button to create a clean starter profile and jump straight to its Tutorials page. Tutorial buttons open slideshow-style explainers in the desktop app, covering profiles, pages, actions, images, imports, hardware access, MCP, privacy, backups, and troubleshooting.
 
 Install a user-local command and desktop launcher:
 
