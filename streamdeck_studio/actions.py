@@ -209,6 +209,8 @@ def run_action(config: ButtonConfig, copy_text: Callable[[str], None] | None = N
         return "No action configured."
     if action_type == "page":
         return "Switched page."
+    if action_type == "tutorial":
+        return "Opened tutorial."
     if action_type == "media":
         return _run_media_action(target)
     if action_type == "shortcut":

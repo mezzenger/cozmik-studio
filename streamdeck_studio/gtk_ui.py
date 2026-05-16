@@ -944,9 +944,13 @@ class MainWindow(Adw.ApplicationWindow):
         try:
             config = self.profile.get_button(index)
             self._log(f"release key={index} label={config.label!r} action={config.action_type} target={redact_target(config)!r}")
-            if self._show_tutorial_if_needed(config):
-                self._last_action = f"release key={index}: opened tutorial {config.label!r}"
-                self._set_status(f"Tutorial: {config.label}", "success")
+            tutorial_result = self._show_tutorial_if_needed(config)
+            if tutorial_result:
+                if tutorial_result == "opened":
+                    self._last_action = f"release key={index}: opened tutorial {config.label!r}"
+                    self._set_status(f"Tutorial: {config.label}", "success")
+                else:
+                    self._last_action = f"release key={index}: tutorial failed"
                 self._refresh_diagnostics()
                 return False
             if config.action_type == "text":
@@ -976,10 +980,14 @@ class MainWindow(Adw.ApplicationWindow):
         try:
             config = self.profile.get_button(index)
             self._log(f"press key={index} label={config.label!r} action={config.action_type} target={redact_target(config)!r}")
-            if self._show_tutorial_if_needed(config):
+            tutorial_result = self._show_tutorial_if_needed(config)
+            if tutorial_result:
                 self._suppress_release.add(index)
-                self._last_action = f"press key={index}: opened tutorial {config.label!r}"
-                self._set_status(f"Tutorial: {config.label}", "success")
+                if tutorial_result == "opened":
+                    self._last_action = f"press key={index}: opened tutorial {config.label!r}"
+                    self._set_status(f"Tutorial: {config.label}", "success")
+                else:
+                    self._last_action = f"press key={index}: tutorial failed"
             elif config.action_type == "text":
                 message = copy_text_action(config, copy_text=self._copy_text)
                 self._last_action = f"press key={index}: {message}"
@@ -997,17 +1005,22 @@ class MainWindow(Adw.ApplicationWindow):
         self._refresh_diagnostics()
         return False
 
-    def _show_tutorial_if_needed(self, config: Any) -> bool:
-        if config.action_type != "text" or not config.target.startswith(TUTORIAL_TARGET_PREFIX):
-            return False
+    def _show_tutorial_if_needed(self, config: Any) -> str:
+        if config.action_type != "tutorial" and not (
+            config.action_type == "text" and config.target.startswith(TUTORIAL_TARGET_PREFIX)
+        ):
+            return ""
+        if not config.target.startswith(TUTORIAL_TARGET_PREFIX):
+            self._set_status("Tutorial target is missing or invalid.", "error")
+            return "error"
         try:
             slides = json.loads(config.target[len(TUTORIAL_TARGET_PREFIX) :])
         except json.JSONDecodeError as exc:
             self._set_status(f"Tutorial is not readable: {exc}", "error")
-            return True
+            return "error"
         if not isinstance(slides, list) or not slides:
             self._set_status("Tutorial has no slides.", "error")
-            return True
+            return "error"
         normalized = []
         for slide in slides:
             if not isinstance(slide, dict):
@@ -1018,9 +1031,9 @@ class MainWindow(Adw.ApplicationWindow):
                 normalized.append({"title": title or config.label, "body": body})
         if not normalized:
             self._set_status("Tutorial has no readable slides.", "error")
-            return True
+            return "error"
         self._show_tutorial_slideshow(config.label or "Tutorial", config.subtitle, normalized)
-        return True
+        return "opened"
 
     def _show_tutorial_slideshow(self, title: str, subtitle: str, slides: list[dict[str, str]]) -> None:
         window = Gtk.Window(title=title, transient_for=self, modal=True)

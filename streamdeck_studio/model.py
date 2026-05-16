@@ -9,7 +9,7 @@ import shutil
 from typing import Any
 
 
-ACTION_TYPES = ("none", "command", "shell", "url", "file", "text", "page", "media", "shortcut", "keys")
+ACTION_TYPES = ("none", "command", "shell", "url", "file", "text", "page", "media", "shortcut", "keys", "tutorial")
 LABEL_POSITIONS = ("bottom", "top", "middle")
 DEFAULT_PROFILE_ID = "default"
 NEW_PROFILE_NAME = "New Profile"
@@ -716,17 +716,34 @@ def _configure_default_main_page(profile: Profile) -> None:
 
 
 def _configure_tutorial_page(profile: Profile) -> None:
-    for index, topic in enumerate(TUTORIAL_TOPICS[: profile.button_count()]):
+    button_count = profile.button_count()
+    topic_count = max(0, button_count - 1)
+    for index, topic in enumerate(TUTORIAL_TOPICS[:topic_count]):
         profile.set_button(
             index,
             ButtonConfig(
                 label=str(topic["label"]),
                 subtitle=str(topic["subtitle"]),
-                action_type="text",
+                action_type="tutorial",
                 target=_tutorial_target(topic["slides"]),
                 background=str(topic["background"]),
                 foreground="#ffffff",
                 action_image_path=str(_tutorial_icon_path(str(topic["icon"]))),
+                label_position="bottom",
+            ),
+            page_id="tutorials",
+        )
+    if button_count:
+        profile.set_button(
+            button_count - 1,
+            ButtonConfig(
+                label="Home",
+                subtitle="MAIN",
+                action_type="page",
+                target="main",
+                background="#123c69",
+                foreground="#ffffff",
+                action_image_path=str(_resource_action_icon_path("default", "home.png")),
                 label_position="bottom",
             ),
             page_id="tutorials",
@@ -739,6 +756,10 @@ def _tutorial_target(slides: Any) -> str:
 
 def _tutorial_icon_path(name: str) -> Path:
     return Path(__file__).parent / "resources" / "action-images" / "tutorials" / name
+
+
+def _resource_action_icon_path(group: str, name: str) -> Path:
+    return Path(__file__).parent / "resources" / "action-images" / group / name
 
 
 def delete_profile_by_id(profile_id: str) -> None:

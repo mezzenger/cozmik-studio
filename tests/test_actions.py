@@ -38,6 +38,10 @@ def test_command_action_rejects_bad_quoting():
         run_action(ButtonConfig(action_type="command", target="echo 'unterminated"))
 
 
+def test_tutorial_action_is_gui_handled_noop():
+    assert run_action(ButtonConfig(action_type="tutorial", target="cozmik-tutorial:[]")) == "Opened tutorial."
+
+
 def test_text_action_copies_before_paste():
     calls = []
 

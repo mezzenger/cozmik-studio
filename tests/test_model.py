@@ -119,9 +119,12 @@ def test_default_icon_profile_has_main_and_tutorial_pages():
     assert profile.get_button(5, "main").action_type == "page"
     assert profile.get_button(5, "main").target == "tutorials"
     assert profile.get_button(0, "tutorials").label == "Start Here"
-    assert profile.get_button(0, "tutorials").action_type == "text"
+    assert profile.get_button(0, "tutorials").action_type == "tutorial"
     assert profile.get_button(0, "tutorials").target.startswith(TUTORIAL_TARGET_PREFIX)
     assert profile.get_button(0, "tutorials").action_image_path.endswith("start-here.png")
+    assert profile.get_button(14, "tutorials").label == "Home"
+    assert profile.get_button(14, "tutorials").action_type == "page"
+    assert profile.get_button(14, "tutorials").target == "main"
 
 
 def test_default_tutorial_page_contains_readable_explainers():
@@ -144,13 +147,15 @@ def test_default_tutorial_page_contains_readable_explainers():
         "Privacy",
         "Backups",
         "Fix Issues",
-        "Workflow",
+        "Home",
     ]
-    for index in range(15):
+    for index in range(14):
         button = profile.get_button(index, "tutorials")
         assert button.subtitle
+        assert button.action_type == "tutorial"
         assert button.target.startswith(TUTORIAL_TARGET_PREFIX)
         assert button.action_image_path.endswith(".png")
+    assert profile.get_button(14, "tutorials").action_type == "page"
 
 
 def test_mcp_profile_edits_persist_after_activation(tmp_path, monkeypatch):
