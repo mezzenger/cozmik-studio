@@ -1,10 +1,12 @@
 from streamdeck_studio.model import (
     ButtonConfig,
+    LABEL_POSITIONS,
     MCP_PROFILE_ID,
     MCP_PROFILE_NAME,
     Profile,
     TUTORIAL_TARGET_PREFIX,
     create_default_icon_profile,
+    ensure_shared_access_buttons,
     ensure_tutorial_home_button,
     ensure_mcp_profile,
     list_profile_ids,
@@ -19,6 +21,10 @@ from streamdeck_studio.model import (
 )
 
 
+def test_label_positions_are_ordered_for_editor_choices():
+    assert LABEL_POSITIONS == ("top", "middle", "bottom")
+
+
 def test_profile_round_trip(tmp_path):
     path = tmp_path / "profile.json"
     profile = Profile(name="Work", rows=2, columns=3)
@@ -28,6 +34,8 @@ def test_profile_round_trip(tmp_path):
     profile.get_button(1).background_image_path = "/tmp/background.png"
     profile.get_button(1).action_image_path = "/tmp/action.png"
     profile.get_button(1).label_position = "top"
+    profile.screensaver_gif_path = "/tmp/idle.gif"
+    profile.screensaver_idle_seconds = 45
 
     save_profile(profile, path)
     loaded = load_profile(path)
@@ -40,6 +48,8 @@ def test_profile_round_trip(tmp_path):
     assert loaded.get_button(1).background_image_path == "/tmp/background.png"
     assert loaded.get_button(1).action_image_path == "/tmp/action.png"
     assert loaded.get_button(1).label_position == "top"
+    assert loaded.screensaver_gif_path == "/tmp/idle.gif"
+    assert loaded.screensaver_idle_seconds == 45
 
 
 def test_invalid_label_position_loads_as_bottom():
@@ -119,6 +129,12 @@ def test_default_icon_profile_has_main_and_tutorial_pages():
     assert profile.get_button(5, "main").label == "Tutorials"
     assert profile.get_button(5, "main").action_type == "page"
     assert profile.get_button(5, "main").target == "tutorials"
+    assert profile.get_button(13, "main").label == "Super"
+    assert profile.get_button(13, "main").action_type == "shortcut"
+    assert profile.get_button(13, "main").target == "super"
+    assert profile.get_button(14, "main").label == "Tutorials"
+    assert profile.get_button(14, "main").action_type == "page"
+    assert profile.get_button(14, "main").target == "tutorials"
     assert profile.get_button(0, "tutorials").label == "Start Here"
     assert profile.get_button(0, "tutorials").action_type == "tutorial"
     assert profile.get_button(0, "tutorials").target.startswith(TUTORIAL_TARGET_PREFIX)
@@ -168,6 +184,33 @@ def test_ensure_tutorial_home_button_repairs_existing_tutorial_page():
     assert profile.get_button(14, "tutorials").action_type == "page"
     assert profile.get_button(14, "tutorials").target == "main"
     assert ensure_tutorial_home_button(profile) is False
+
+
+def test_ensure_shared_access_buttons_repairs_named_tutorial_target_without_clobbering_buttons():
+    profile = Profile(
+        name="Imported",
+        pages={
+            "MAIN-ID": {
+                "13": ButtonConfig(label="Mute", action_type="command", target="wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle"),
+                "14": ButtonConfig(action_type="page", target="Tutorials"),
+            },
+            "APPS-ID": {
+                "13": ButtonConfig(action_type="command", target="ydotool key 125:1 125:0"),
+                "14": ButtonConfig(action_type="page", target="Tutorials"),
+            },
+            "TUTORIAL-ID": {},
+        },
+        page_names={"MAIN-ID": "MAIN", "APPS-ID": "Apps", "TUTORIAL-ID": "Tutorials"},
+        current_page="MAIN-ID",
+    )
+
+    assert ensure_shared_access_buttons(profile) is True
+
+    assert profile.get_button(13, "MAIN-ID").label == "Mute"
+    assert profile.get_button(14, "MAIN-ID").target == "TUTORIAL-ID"
+    assert profile.get_button(12, "MAIN-ID").label == "Super"
+    assert profile.get_button(14, "APPS-ID").target == "TUTORIAL-ID"
+    assert profile.get_button(13, "APPS-ID").target == "ydotool key 125:1 125:0"
 
 
 def test_mcp_profile_edits_persist_after_activation(tmp_path, monkeypatch):

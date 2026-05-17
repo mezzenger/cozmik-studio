@@ -57,6 +57,41 @@ def render_button_image(config: ButtonConfig, size: tuple[int, int] = (144, 144)
     return image
 
 
+def render_screensaver_key_image(
+    path_value: str,
+    key_size: tuple[int, int],
+    rows: int,
+    columns: int,
+    index: int,
+    frame_index: int = 0,
+) -> Image.Image:
+    path = Path(path_value).expanduser()
+    if not path.exists():
+        return Image.new("RGB", key_size, "black")
+    try:
+        frame = _image_frame(path, frame_index).convert("RGB")
+    except OSError:
+        return Image.new("RGB", key_size, "black")
+    key_width, key_height = key_size
+    full = _cover_image(frame, (key_width * columns, key_height * rows))
+    column = index % columns
+    row = index // columns
+    left = column * key_width
+    top = row * key_height
+    return full.crop((left, top, left + key_width, top + key_height))
+
+
+def render_screensaver_preview_image(path_value: str, size: tuple[int, int], frame_index: int = 0) -> Image.Image:
+    path = Path(path_value).expanduser()
+    if not path.exists():
+        return Image.new("RGB", size, "black")
+    try:
+        frame = _image_frame(path, frame_index).convert("RGB")
+    except OSError:
+        return Image.new("RGB", size, "black")
+    return _fit_image(frame, size)
+
+
 def button_animation_frame_count(config: ButtonConfig) -> int:
     return max((_frame_count(path) for path in _image_paths(config)), default=1)
 

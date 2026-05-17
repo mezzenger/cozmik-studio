@@ -1,6 +1,6 @@
 from PIL import Image
 
-from streamdeck_studio.images import button_animation_frame_count, button_animation_frame_duration, render_button_image
+from streamdeck_studio.images import button_animation_frame_count, button_animation_frame_duration, render_button_image, render_screensaver_key_image
 from streamdeck_studio.model import ButtonConfig
 
 
@@ -63,6 +63,21 @@ def test_render_button_uses_animated_gif_frames(tmp_path):
     assert button_animation_frame_duration(config, 0) == 0.08
     assert button_animation_frame_duration(config, 1) == 0.12
     assert first.getpixel((72, 36)) != second.getpixel((72, 36))
+
+
+def test_render_screensaver_key_image_crops_one_large_frame_across_keys(tmp_path):
+    gif_path = tmp_path / "wide.gif"
+    frame = Image.new("RGB", (48, 24), "red")
+    for x in range(24, 48):
+        for y in range(24):
+            frame.putpixel((x, y), (0, 0, 255))
+    frame.save(gif_path, save_all=True)
+
+    left = render_screensaver_key_image(str(gif_path), (24, 24), rows=1, columns=2, index=0)
+    right = render_screensaver_key_image(str(gif_path), (24, 24), rows=1, columns=2, index=1)
+
+    assert left.getpixel((12, 12)) == (255, 0, 0)
+    assert right.getpixel((12, 12)) == (0, 0, 255)
 
 
 def test_blank_subtitle_stays_blank(monkeypatch):

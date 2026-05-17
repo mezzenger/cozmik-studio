@@ -27,7 +27,7 @@ from .action_icons import action_icons
 from .actions import ActionError, copy_text_action, paste_text_action, run_action
 from .deck import StreamDeckController
 from .diagnostics import profile_diagnostics, redact_target
-from .images import render_button_image
+from .images import button_animation_frame_count, button_animation_frame_duration, render_button_image, render_screensaver_preview_image
 from .importers import ImportProfileError, import_profile
 from .model import (
     ACTION_TYPES,
@@ -35,6 +35,7 @@ from .model import (
     MCP_PROFILE_ID,
     MCP_PROFILE_NAME,
     NEW_PROFILE_NAME,
+    ButtonConfig,
     Profile,
     TUTORIAL_TARGET_PREFIX,
     config_dir,
@@ -46,6 +47,7 @@ from .model import (
     load_active_profile,
     load_default_profile_id,
     load_profile_by_id,
+    profile_assets_dir,
     profile_id_from_name,
     profile_action_icons_dir,
     profile_is_saved,
@@ -143,6 +145,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._undo_stack: list[dict[str, Any]] = []
         self.diagnostics_window = None
         self.diagnostics_view = None
+        self.tutorial_window = None
         self._force_quit = False
         self._tray_available = False
         self._tray_hold = False
@@ -157,13 +160,14 @@ class MainWindow(Adw.ApplicationWindow):
             self._set_status(self.startup_message)
 
     def do_close_request(self):
+        self.deck.stop_screensaver_preview()
         self._save_profile(silent=True)
         if self._tray_available and not self._force_quit:
             self._hide_to_tray()
             return True
         self._shutdown_tray_indicator()
         self._save_profile(silent=True)
-        self.deck.close()
+        self.deck.close(reset=True)
         return False
 
     def _build_ui(self) -> None:
@@ -247,7 +251,6 @@ class MainWindow(Adw.ApplicationWindow):
         self.foreground_button = Gtk.ColorButton()
         self.background_image_entry = Gtk.Entry()
         self.action_image_entry = Gtk.Entry()
-
         self._attach_row(form, 0, "Number", self.index_label)
         self._attach_row(form, 1, "Label", self.label_entry)
         self._attach_row(form, 2, "Subtitle", self.subtitle_entry)
@@ -272,6 +275,21 @@ class MainWindow(Adw.ApplicationWindow):
         self._attach_row(form, 8, "Background Image", self._image_row(self.background_image_entry, "background"))
         self._attach_row(form, 9, "Action Image", self._image_row(self.action_image_entry, "action"))
 
+        profile_settings = Gtk.Frame(label="Profile")
+        right.append(profile_settings)
+        profile_form = Gtk.Grid(column_spacing=8, row_spacing=8)
+        profile_form.set_margin_top(10)
+        profile_form.set_margin_bottom(10)
+        profile_form.set_margin_start(10)
+        profile_form.set_margin_end(10)
+        profile_settings.set_child(profile_form)
+
+        self.screensaver_gif_entry = Gtk.Entry()
+        self.screensaver_idle_spin = Gtk.SpinButton.new_with_range(0, 3600, 5)
+        self.screensaver_idle_spin.set_tooltip_text("Seconds idle before the screensaver starts. Set to 0 to disable.")
+        self._attach_row(profile_form, 0, "Screensaver", self._screensaver_row())
+        self._attach_row(profile_form, 1, "Idle Seconds", self.screensaver_idle_spin)
+
         self.status_label = Gtk.Label(xalign=0)
         self.status_label.add_css_class("status-label")
         root.append(self.status_label)
@@ -285,6 +303,8 @@ class MainWindow(Adw.ApplicationWindow):
         self.foreground_button.connect("color-set", lambda *_args: self._color_changed())
         self.background_image_entry.connect("changed", lambda *_args: self._editor_changed())
         self.action_image_entry.connect("changed", lambda *_args: self._editor_changed())
+        self.screensaver_gif_entry.connect("changed", lambda *_args: self._editor_changed())
+        self.screensaver_idle_spin.connect("value-changed", lambda *_args: self._editor_changed())
 
         self._rebuild_grid()
         self._refresh_profile_combo()
@@ -380,6 +400,23 @@ class MainWindow(Adw.ApplicationWindow):
         clear = Gtk.Button(label="Clear")
         clear.connect("clicked", lambda *_args, target=entry: target.set_text(""))
         row.append(choose)
+        row.append(clear)
+        return row
+
+    def _screensaver_row(self) -> Gtk.Box:
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        self.screensaver_combo = Gtk.ComboBoxText()
+        self.screensaver_combo.set_hexpand(True)
+        self.screensaver_combo.connect("changed", lambda *_args: self._screensaver_combo_changed())
+        row.append(self.screensaver_combo)
+        browse = Gtk.Button(label="Browse")
+        browse.connect("clicked", lambda *_args: self._choose_screensaver_file())
+        preview = Gtk.Button(label="Preview")
+        preview.connect("clicked", lambda *_args: self._preview_screensaver())
+        clear = Gtk.Button(label="Clear")
+        clear.connect("clicked", lambda *_args: self._set_screensaver_path(""))
+        row.append(browse)
+        row.append(preview)
         row.append(clear)
         return row
 
@@ -538,7 +575,9 @@ class MainWindow(Adw.ApplicationWindow):
         self.label_entry.set_text(config.label)
         self.subtitle_entry.set_text(config.subtitle)
         self.label_position_combo.set_active(
-            LABEL_POSITIONS.index(config.label_position) if config.label_position in LABEL_POSITIONS else 0
+            LABEL_POSITIONS.index(config.label_position)
+            if config.label_position in LABEL_POSITIONS
+            else LABEL_POSITIONS.index("bottom")
         )
         self.action_combo.set_active(ACTION_TYPES.index(config.action_type) if config.action_type in ACTION_TYPES else 0)
         self._set_text_view(config.target)
@@ -546,6 +585,9 @@ class MainWindow(Adw.ApplicationWindow):
         self._set_color(self.foreground_button, config.foreground)
         self.background_image_entry.set_text(config.background_image_path)
         self.action_image_entry.set_text(config.action_image_path)
+        self.screensaver_gif_entry.set_text(self.profile.screensaver_gif_path)
+        self._refresh_screensaver_combo()
+        self.screensaver_idle_spin.set_value(self.profile.screensaver_idle_seconds)
         self._updating_editor = False
         self._refresh_diagnostics()
 
@@ -563,8 +605,14 @@ class MainWindow(Adw.ApplicationWindow):
         config.foreground = _rgba_to_hex(self.foreground_button.get_rgba())
         config.background_image_path = self.background_image_entry.get_text().strip()
         config.action_image_path = self.action_image_entry.get_text().strip()
+        screensaver_before = (self.profile.screensaver_gif_path, self.profile.screensaver_idle_seconds)
+        self.profile.screensaver_gif_path = self.screensaver_gif_entry.get_text().strip()
+        self.profile.screensaver_idle_seconds = max(0, int(self.screensaver_idle_spin.get_value()))
         self._refresh_preview(self.selected_index)
-        self.deck.apply_button(self.profile, self.selected_index)
+        if screensaver_before != (self.profile.screensaver_gif_path, self.profile.screensaver_idle_seconds):
+            self.deck.apply_profile(self.profile)
+        else:
+            self.deck.apply_button(self.profile, self.selected_index)
         self._save_profile(silent=True)
         if self._is_unnamed_profile(self.profile):
             self._show_profile_name_entry()
@@ -876,6 +924,165 @@ class MainWindow(Adw.ApplicationWindow):
 
         window.present()
 
+    def _show_screensaver_gallery(self) -> None:
+        window = Gtk.Window(title="Choose Profile Screensaver", transient_for=self, modal=True)
+        window.set_default_size(620, 520)
+        root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        root.set_margin_top(12)
+        root.set_margin_bottom(12)
+        root.set_margin_start(12)
+        root.set_margin_end(12)
+        window.set_child(root)
+
+        toolbar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        browse = Gtk.Button(label="Browse File")
+        browse.connect("clicked", lambda *_args: (window.close(), self._choose_screensaver_file()))
+        toolbar.append(browse)
+        clear = Gtk.Button(label="Clear")
+        clear.connect("clicked", lambda *_args: (self._set_screensaver_path(""), window.close()))
+        toolbar.append(clear)
+        root.append(toolbar)
+
+        scrolled = Gtk.ScrolledWindow()
+        scrolled.set_vexpand(True)
+        flow = Gtk.FlowBox()
+        flow.set_selection_mode(Gtk.SelectionMode.NONE)
+        flow.set_max_children_per_line(5)
+        flow.set_column_spacing(10)
+        flow.set_row_spacing(10)
+        scrolled.set_child(flow)
+        for path in self._screensaver_gif_options():
+            flow.insert(self._screensaver_gallery_button(path, window), -1)
+        root.append(scrolled)
+        window.present()
+
+    def _screensaver_gallery_button(self, path: Path, window: Gtk.Window) -> Gtk.Button:
+        button = Gtk.Button()
+        button.set_tooltip_text(path.stem.replace("_", " ").replace("-", " ").title())
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        box.set_margin_top(4)
+        box.set_margin_bottom(6)
+        box.set_margin_start(4)
+        box.set_margin_end(4)
+        preview = Gtk.Image()
+        preview.set_pixel_size(66)
+        try:
+            pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_scale(str(path), 66, 66, True)
+            preview.set_from_pixbuf(pixbuf)
+        except GLib.Error:
+            preview.set_from_icon_name("image-missing-symbolic")
+        label = Gtk.Label(label=path.stem.replace("_", " ").replace("-", " ").title())
+        label.set_max_width_chars(13)
+        label.set_ellipsize(3)
+        box.append(preview)
+        box.append(label)
+        button.set_child(box)
+        button.connect("clicked", lambda *_args, gif_path=path: (self._set_screensaver_path(str(gif_path)), window.close()))
+        return button
+
+    def _screensaver_gif_options(self) -> list[Path]:
+        roots = [
+            Path(__file__).resolve().parent / "resources" / "screensavers",
+        ]
+        paths: list[Path] = []
+        for root in roots:
+            if root.exists():
+                paths.extend(path for path in root.rglob("*.gif") if path.is_file())
+        return sorted(dict.fromkeys(paths), key=lambda path: path.name.casefold())
+
+    def _refresh_screensaver_combo(self) -> None:
+        if not hasattr(self, "screensaver_combo"):
+            return
+        current = self.screensaver_gif_entry.get_text().strip()
+        was_updating = self._updating_editor
+        self._updating_editor = True
+        self.screensaver_combo.remove_all()
+        self.screensaver_combo.append("__none__", "None")
+        option_paths = [str(path) for path in self._screensaver_gif_options()]
+        if current and current not in option_paths:
+            option_paths.append(current)
+        for path in option_paths:
+            self.screensaver_combo.append(path, self._screensaver_display_name(path))
+        self.screensaver_combo.set_active_id(current or "__none__")
+        self.screensaver_combo.set_tooltip_text(current or "No profile screensaver selected")
+        self._updating_editor = was_updating
+
+    def _screensaver_combo_changed(self) -> None:
+        if self._updating_editor:
+            return
+        active = self.screensaver_combo.get_active_id()
+        self._set_screensaver_path("" if not active or active == "__none__" else active)
+
+    def _screensaver_display_name(self, path: str) -> str:
+        return Path(path).stem.replace("_", " ").replace("-", " ").title()
+
+    def _choose_screensaver_file(self) -> None:
+        dialog = Gtk.FileChooserNative.new("Choose screensaver GIF", self, Gtk.FileChooserAction.OPEN, "Choose", "Cancel")
+        dialog.connect("response", self._on_screensaver_file_chosen)
+        dialog.show()
+
+    def _on_screensaver_file_chosen(self, dialog: Gtk.FileChooserNative, response: int) -> None:
+        if response == Gtk.ResponseType.ACCEPT:
+            file = dialog.get_file()
+            if file and file.get_path():
+                try:
+                    self._set_screensaver_path(str(self._import_screensaver_file(Path(file.get_path()))))
+                except OSError as exc:
+                    self._set_status(f"Could not import screensaver GIF: {exc}", "error")
+        dialog.destroy()
+
+    def _set_screensaver_path(self, path: str) -> None:
+        if path and int(self.screensaver_idle_spin.get_value()) <= 0:
+            self.screensaver_idle_spin.set_value(60)
+        self.screensaver_gif_entry.set_text(path)
+        self._refresh_screensaver_combo()
+
+    def _preview_screensaver(self) -> None:
+        path = Path(self.screensaver_gif_entry.get_text().strip()).expanduser()
+        if not path.exists():
+            self._set_status("Choose a profile screensaver first.", "error")
+            return
+        deck_preview_started = self.deck.preview_screensaver(str(path))
+        if not deck_preview_started and self.deck.info.connected:
+            self._set_status("Could not preview screensaver on the Stream Deck.", "error")
+        window = Gtk.Window(title="Screensaver Preview", transient_for=self, modal=True)
+        window.set_default_size(360, 360)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        box.set_margin_top(12)
+        box.set_margin_bottom(12)
+        box.set_margin_start(12)
+        box.set_margin_end(12)
+        window.set_child(box)
+        preview = Gtk.Image()
+        preview.set_pixel_size(300)
+        preview.set_vexpand(True)
+        box.append(preview)
+        close = Gtk.Button(label="Close")
+        box.append(close)
+        state = {"frame": 0, "timer": 0}
+
+        def update_preview() -> bool:
+            image = render_screensaver_preview_image(str(path), (300, 300), int(state["frame"]))
+            preview.set_from_pixbuf(_pixbuf_from_pil(image))
+            frame_count = button_animation_frame_count(ButtonConfig(image_path=str(path)))
+            state["frame"] = (int(state["frame"]) + 1) % max(1, frame_count)
+            delay_ms = max(30, int(button_animation_frame_duration(ButtonConfig(image_path=str(path)), int(state["frame"])) * 1000))
+            state["timer"] = GLib.timeout_add(delay_ms, update_preview)
+            return False
+
+        def stop_preview(_window) -> None:
+            timer_id = int(state.get("timer", 0))
+            if timer_id:
+                GLib.source_remove(timer_id)
+                state["timer"] = 0
+            self.deck.stop_screensaver_preview()
+
+        close.connect("clicked", lambda *_args: (stop_preview(window), window.close()))
+        window.connect("close-request", lambda *_args: (stop_preview(window), False)[1])
+        window.connect("destroy", stop_preview)
+        update_preview()
+        window.present()
+
     def _action_icon_group_sort_key(self, group: str) -> tuple[int, str]:
         if group == "Default":
             return (0, "")
@@ -919,6 +1126,21 @@ class MainWindow(Adw.ApplicationWindow):
         target_directory.mkdir(parents=True, exist_ok=True)
         stem = self._safe_asset_stem(source.stem) or "icon"
         suffix = source.suffix.lower() if source.suffix else ".png"
+        target = target_directory / f"{stem}{suffix}"
+        counter = 2
+        while target.exists() and not source.samefile(target):
+            target = target_directory / f"{stem}-{counter}{suffix}"
+            counter += 1
+        if target.exists() and source.samefile(target):
+            return target
+        shutil.copy2(source, target)
+        return target
+
+    def _import_screensaver_file(self, source: Path) -> Path:
+        target_directory = profile_assets_dir(self.profile_id) / "screensavers"
+        target_directory.mkdir(parents=True, exist_ok=True)
+        stem = self._safe_asset_stem(source.stem) or "screensaver"
+        suffix = source.suffix.lower() if source.suffix else ".gif"
         target = target_directory / f"{stem}{suffix}"
         counter = 2
         while target.exists() and not source.samefile(target):
@@ -1037,7 +1259,11 @@ class MainWindow(Adw.ApplicationWindow):
         return "opened"
 
     def _show_tutorial_slideshow(self, title: str, subtitle: str, slides: list[dict[str, str]]) -> None:
+        if self.tutorial_window is not None:
+            self.tutorial_window.close()
+
         window = Gtk.Window(title=title, transient_for=self, modal=True)
+        self.tutorial_window = window
         window.set_default_size(620, 480)
         window.add_css_class("tutorial-window")
 
@@ -1133,6 +1359,10 @@ class MainWindow(Adw.ApplicationWindow):
             state["index"] = next_index
             update()
 
+        def select_index(index: int) -> None:
+            stop_timer()
+            set_index(index)
+
         def advance() -> bool:
             current = int(state["index"])
             if current >= len(slides) - 1:
@@ -1146,11 +1376,15 @@ class MainWindow(Adw.ApplicationWindow):
                 GLib.source_remove(timer_id)
                 state["timer"] = 0
 
+        def clear_tutorial_window(_window) -> None:
+            if self.tutorial_window is window:
+                self.tutorial_window = None
+
         for index in range(len(slides)):
             button = Gtk.Button(label=str(index + 1))
             button.add_css_class("tutorial-selector-button")
             button.set_tooltip_text(f"Show slide {index + 1}")
-            button.connect("clicked", lambda *_args, slide_index=index: set_index(slide_index))
+            button.connect("clicked", lambda *_args, slide_index=index: select_index(slide_index))
             selector.append(button)
             selector_buttons.append(button)
 
@@ -1158,6 +1392,7 @@ class MainWindow(Adw.ApplicationWindow):
         next_button.connect("clicked", lambda *_args: set_index(0 if int(state["index"]) == len(slides) - 1 else int(state["index"]) + 1))
         close.connect("clicked", lambda *_args: window.close())
         window.connect("close-request", lambda *_args: (stop_timer(), False)[1])
+        window.connect("destroy", clear_tutorial_window)
         state["timer"] = GLib.timeout_add_seconds(7, advance)
         update()
         window.present()

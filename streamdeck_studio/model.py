@@ -10,13 +10,14 @@ from typing import Any
 
 
 ACTION_TYPES = ("none", "command", "shell", "url", "file", "text", "page", "media", "shortcut", "keys", "tutorial")
-LABEL_POSITIONS = ("bottom", "top", "middle")
+LABEL_POSITIONS = ("top", "middle", "bottom")
 DEFAULT_PROFILE_ID = "default"
 NEW_PROFILE_NAME = "New Profile"
 MCP_PROFILE_ID = "mcp-deck"
 MCP_PROFILE_NAME = "MCP Deck"
 DEFAULT_PROFILE_PAGES = {"main": "Main", "tutorials": "Tutorials"}
 TUTORIAL_TARGET_PREFIX = "cozmik-tutorial:"
+SUPER_SHORTCUT_TARGET = "super"
 DEFAULT_ICON_NAMES = (
     "home",
     "folder",
@@ -394,6 +395,8 @@ class Profile:
     name: str = "Default"
     rows: int = 3
     columns: int = 5
+    screensaver_gif_path: str = ""
+    screensaver_idle_seconds: int = 0
     buttons: dict[str, ButtonConfig] = field(default_factory=dict)
     pages: dict[str, dict[str, ButtonConfig]] = field(default_factory=dict)
     page_names: dict[str, str] = field(default_factory=dict)
@@ -472,6 +475,8 @@ class Profile:
             name=str(data.get("name", "Default")),
             rows=int(data.get("rows", 3)),
             columns=int(data.get("columns", 5)),
+            screensaver_gif_path=str(data.get("screensaver_gif_path", "")),
+            screensaver_idle_seconds=max(0, int(data.get("screensaver_idle_seconds", 0) or 0)),
             current_page=str(data.get("current_page", "main")),
         )
         raw_buttons = data.get("buttons", {})
@@ -512,6 +517,8 @@ class Profile:
             "name": self.name,
             "rows": self.rows,
             "columns": self.columns,
+            "screensaver_gif_path": self.screensaver_gif_path,
+            "screensaver_idle_seconds": self.screensaver_idle_seconds,
             "buttons": {key: asdict(value) for key, value in self.buttons.items()},
             "pages": {
                 page_id: {key: asdict(value) for key, value in buttons.items()}
@@ -691,6 +698,7 @@ def create_default_icon_profile(name: str = NEW_PROFILE_NAME, rows: int = 3, col
             profile.pages[page_id][str(index)] = ButtonConfig(action_image_path=str(path))
     _configure_default_main_page(profile)
     _configure_tutorial_page(profile)
+    _configure_shared_access_buttons(profile)
     profile.current_page = "main"
     profile.buttons = profile.pages["main"]
     return profile
@@ -735,6 +743,112 @@ def _configure_tutorial_page(profile: Profile) -> None:
         )
     if button_count:
         _set_tutorial_home_button(profile)
+
+
+def ensure_shared_access_buttons(profile: Profile) -> bool:
+    changed = False
+    tutorial_page = _tutorial_page_id(profile)
+    if not tutorial_page:
+        tutorial_page = "tutorials"
+        profile.ensure_page(tutorial_page, "Tutorials")
+        _configure_tutorial_page(profile)
+        changed = True
+
+    for page_id, buttons in profile.pages.items():
+        if page_id == tutorial_page:
+            continue
+        changed = _fix_tutorial_targets(buttons, tutorial_page) or changed
+        if not _page_has_super_button(buttons):
+            changed = _place_access_button(profile, page_id, profile.button_count() - 2, _super_button_config()) or changed
+        if not _page_has_tutorials_button(buttons, tutorial_page):
+            changed = (
+                _place_access_button(profile, page_id, profile.button_count() - 1, _tutorials_button_config(tutorial_page))
+                or changed
+            )
+    if profile.current_page in profile.pages:
+        profile.buttons = profile.pages[profile.current_page]
+    return changed
+
+
+def _configure_shared_access_buttons(profile: Profile) -> None:
+    tutorial_page = _tutorial_page_id(profile) or "tutorials"
+    for page_id in list(profile.pages):
+        if page_id == tutorial_page:
+            continue
+        if profile.button_count() >= 2:
+            profile.set_button(profile.button_count() - 2, _super_button_config(), page_id)
+            profile.set_button(profile.button_count() - 1, _tutorials_button_config(tutorial_page), page_id)
+
+
+def _tutorial_page_id(profile: Profile) -> str:
+    if "tutorials" in profile.pages:
+        return "tutorials"
+    for page_id, name in profile.page_names.items():
+        if name.strip().casefold() == "tutorials" and page_id in profile.pages:
+            return page_id
+    return ""
+
+
+def _fix_tutorial_targets(buttons: dict[str, ButtonConfig], tutorial_page: str) -> bool:
+    changed = False
+    for button in buttons.values():
+        if button.action_type == "page" and button.target.strip().casefold() == "tutorials" and button.target != tutorial_page:
+            button.target = tutorial_page
+            changed = True
+    return changed
+
+
+def _page_has_super_button(buttons: dict[str, ButtonConfig]) -> bool:
+    return any(
+        button.action_type in {"shortcut", "keys", "command"}
+        and button.target.strip().casefold() in {SUPER_SHORTCUT_TARGET, "ydotool key 125:1 125:0"}
+        for button in buttons.values()
+    )
+
+
+def _page_has_tutorials_button(buttons: dict[str, ButtonConfig], tutorial_page: str) -> bool:
+    return any(button.action_type == "page" and button.target == tutorial_page for button in buttons.values())
+
+
+def _place_access_button(profile: Profile, page_id: str, preferred_index: int, config: ButtonConfig) -> bool:
+    if preferred_index < 0:
+        return False
+    for index in [preferred_index, *range(profile.button_count() - 1, -1, -1)]:
+        button = profile.get_button(index, page_id)
+        if _button_is_empty(button):
+            profile.set_button(index, config, page_id)
+            return True
+    return False
+
+
+def _button_is_empty(button: ButtonConfig) -> bool:
+    return not any((button.label, button.subtitle, button.target, button.image_path, button.background_image_path, button.action_image_path)) and button.action_type == "none"
+
+
+def _super_button_config() -> ButtonConfig:
+    return ButtonConfig(
+        label="Super",
+        subtitle="KEY",
+        action_type="shortcut",
+        target=SUPER_SHORTCUT_TARGET,
+        background="#1f2937",
+        foreground="#ffffff",
+        action_image_path=str(_resource_action_icon_path("default", "apps.png")),
+        label_position="bottom",
+    )
+
+
+def _tutorials_button_config(tutorial_page: str) -> ButtonConfig:
+    return ButtonConfig(
+        label="Tutorials",
+        subtitle="GUIDE",
+        action_type="page",
+        target=tutorial_page,
+        background="#123c69",
+        foreground="#ffffff",
+        action_image_path=str(_tutorial_icon_path("start-here.png")),
+        label_position="bottom",
+    )
 
 
 def ensure_tutorial_home_button(profile: Profile) -> bool:

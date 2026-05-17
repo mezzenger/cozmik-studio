@@ -10,6 +10,7 @@ Current capabilities:
 - Choose between saved profiles from the top toolbar.
 - Edit button label, subtitle, colors, and action type.
 - Generate button images and apply them to the device.
+- Configure an idle-time animated GIF screensaver from the bundled starter pack or your own GIFs.
 - Run launchers from a physical key release or the app's Run button.
 - Import native JSON profiles and best-effort Elgato `.streamDeckProfile` or `.StreamDeckProfilesBackup` exports.
 - Save profiles under `~/.config/streamdeck-studio/profiles/`.
