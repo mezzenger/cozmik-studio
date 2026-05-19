@@ -1,0 +1,49 @@
+{
+  "id": "home-assistant",
+  "name": "Home Assistant",
+  "description": "Call Home Assistant services from Cozmik buttons using the REST API.",
+  "source_name": "cgiesche/streamdeck-homeassistant",
+  "source_url": "https://github.com/cgiesche/streamdeck-homeassistant",
+  "source_stars": 975,
+  "config_fields": [
+    {
+      "key": "base_url",
+      "label": "Home Assistant URL",
+      "default": "http://homeassistant.local:8123",
+      "required": true,
+      "help": "Base URL for your Home Assistant server."
+    },
+    {
+      "key": "token",
+      "label": "Long-lived access token",
+      "required": true,
+      "secret": true,
+      "help": "Create this from your Home Assistant user profile security page."
+    }
+  ],
+  "actions": [
+    {
+      "id": "call-service",
+      "label": "Call Service",
+      "description": "Call a Home Assistant service. Use JSON target settings for base_url, token, domain, service, entity_id, and optional data.",
+      "settings_template": {
+        "domain": "light",
+        "service": "toggle",
+        "entity_id": "light.office",
+        "data": {}
+      },
+      "command": ["python3", "-m", "streamdeck_studio.plugin_helpers", "home-assistant-call-service", "{settings_json}"]
+    },
+    {
+      "id": "toggle",
+      "label": "Toggle Entity",
+      "description": "Toggle a Home Assistant entity. Use JSON target settings for base_url, token, domain, and entity_id.",
+      "settings_template": {
+        "domain": "light",
+        "service": "toggle",
+        "entity_id": "light.office"
+      },
+      "command": ["python3", "-m", "streamdeck_studio.plugin_helpers", "home-assistant-call-service", "{settings_json}"]
+    }
+  ]
+}

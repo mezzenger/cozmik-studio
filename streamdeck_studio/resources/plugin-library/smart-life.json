@@ -1,0 +1,23 @@
+{
+  "id": "smart-life",
+  "name": "Smart Life",
+  "description": "Configuration page for Smart Life accounts linked through a Tuya Smart Home PaaS cloud project.",
+  "source_name": "Tuya Smart Life app account linking",
+  "source_url": "https://support.tuya.com/en/help/_detail/Kahgo5wqj4f2y",
+  "config_fields": [
+    {"key": "data_center", "label": "Data center", "kind": "select", "default": "Western America", "options": ["China", "Western America", "Eastern America", "Central Europe", "Western Europe", "India"]},
+    {"key": "client_id", "label": "Tuya Cloud Access ID", "required": true},
+    {"key": "client_secret", "label": "Tuya Cloud Access Secret", "required": true, "secret": true},
+    {"key": "smart_life_account", "label": "Smart Life app account", "required": true},
+    {"key": "default_device_id", "label": "Default device ID"}
+  ],
+  "actions": [
+    {
+      "id": "open-link-account",
+      "label": "Open Link Account",
+      "description": "Open Tuya Cloud so you can link the Smart Life app account to the project.",
+      "icon": "default/globe.png",
+      "command": ["xdg-open", "https://platform.tuya.com/cloud/"]
+    }
+  ]
+}

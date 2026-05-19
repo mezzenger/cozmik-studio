@@ -9,8 +9,10 @@ import shutil
 from typing import Any
 
 
-ACTION_TYPES = ("none", "command", "shell", "url", "file", "text", "page", "media", "shortcut", "keys", "tutorial")
+ACTION_TYPES = ("none", "command", "shell", "url", "file", "text", "page", "media", "shortcut", "keys", "plugin", "tutorial")
 LABEL_POSITIONS = ("top", "middle", "bottom")
+STARTUP_MODES = ("normal", "minimized")
+THEME_MODES = ("system", "dark", "light")
 DEFAULT_PROFILE_ID = "default"
 NEW_PROFILE_NAME = "New Profile"
 MCP_PROFILE_ID = "mcp-deck"
@@ -552,6 +554,10 @@ def default_profile_path() -> Path:
     return config_dir() / "default-profile"
 
 
+def app_settings_path() -> Path:
+    return config_dir() / "settings.json"
+
+
 def profile_library_path(profile_id: str) -> Path:
     return profiles_dir() / f"{_clean_profile_id(profile_id)}.json"
 
@@ -660,6 +666,62 @@ def save_default_profile_id(profile_id: str) -> None:
     target = default_profile_path()
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(f"{_clean_profile_id(profile_id)}\n", encoding="utf-8")
+
+
+def load_app_settings() -> dict[str, Any]:
+    try:
+        data = json.loads(app_settings_path().read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
+    if "start_minimized" in data:
+        start_minimized = bool(data.get("start_minimized", False))
+    else:
+        start_minimized = str(data.get("startup_mode", "normal")) == "minimized"
+    theme_mode = str(data.get("theme_mode", "system"))
+    if theme_mode not in THEME_MODES:
+        theme_mode = "system"
+    return {"start_minimized": start_minimized, "theme_mode": theme_mode}
+
+
+def save_app_settings(settings: dict[str, Any]) -> None:
+    current = load_app_settings()
+    if "startup_mode" in settings:
+        current["start_minimized"] = str(settings.get("startup_mode")) == "minimized"
+    if "start_minimized" in settings:
+        current["start_minimized"] = bool(settings.get("start_minimized"))
+    theme_mode = str(settings.get("theme_mode", current["theme_mode"]))
+    if theme_mode not in THEME_MODES:
+        theme_mode = "system"
+    current["theme_mode"] = theme_mode
+    target = app_settings_path()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(json.dumps(current, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def load_startup_mode() -> str:
+    return "minimized" if load_start_minimized() else "normal"
+
+
+def save_startup_mode(startup_mode: str) -> None:
+    save_app_settings({"startup_mode": startup_mode})
+
+
+def load_start_minimized() -> bool:
+    return bool(load_app_settings()["start_minimized"])
+
+
+def save_start_minimized(start_minimized: bool) -> None:
+    save_app_settings({"start_minimized": start_minimized})
+
+
+def load_theme_mode() -> str:
+    return str(load_app_settings()["theme_mode"])
+
+
+def save_theme_mode(theme_mode: str) -> None:
+    save_app_settings({"theme_mode": theme_mode})
 
 
 def load_profile_by_id(profile_id: str) -> Profile:

@@ -11,13 +11,21 @@ from streamdeck_studio.model import (
     ensure_mcp_profile,
     list_profile_ids,
     load_active_profile,
+    load_app_settings,
     load_default_profile_id,
     load_profile,
+    load_start_minimized,
+    load_startup_mode,
+    load_theme_mode,
     next_profile_name,
     save_active_profile_id,
+    save_app_settings,
     save_default_profile_id,
     save_profile,
     save_profile_by_id,
+    save_start_minimized,
+    save_startup_mode,
+    save_theme_mode,
 )
 
 
@@ -104,6 +112,46 @@ def test_default_profile_selection_round_trip(tmp_path, monkeypatch):
     save_default_profile_id("work")
 
     assert load_default_profile_id() == "work"
+
+
+def test_startup_mode_round_trip(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+
+    assert load_startup_mode() == "normal"
+    assert load_start_minimized() is False
+    save_startup_mode("minimized")
+
+    assert load_startup_mode() == "minimized"
+    assert load_start_minimized() is True
+    assert load_app_settings() == {"start_minimized": True, "theme_mode": "system"}
+
+
+def test_start_minimized_round_trip(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+
+    save_start_minimized(True)
+
+    assert load_start_minimized() is True
+    assert load_startup_mode() == "minimized"
+
+
+def test_theme_mode_round_trip(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+
+    assert load_theme_mode() == "system"
+    save_theme_mode("dark")
+
+    assert load_theme_mode() == "dark"
+
+
+def test_invalid_startup_mode_loads_normal(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+
+    save_app_settings({"startup_mode": "sideways"})
+
+    assert load_startup_mode() == "normal"
+    save_app_settings({"theme_mode": "sepia"})
+    assert load_theme_mode() == "system"
 
 
 def test_ensure_mcp_profile_creates_blank_profile(tmp_path, monkeypatch):

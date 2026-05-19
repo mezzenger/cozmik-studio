@@ -1,0 +1,22 @@
+{
+  "id": "yolink",
+  "name": "YoLink",
+  "description": "Configuration page for YoLink cloud API credentials.",
+  "source_name": "YoLink API / yolink-api",
+  "source_url": "https://pypi.org/project/yolink-api/",
+  "config_fields": [
+    {"key": "uaid", "label": "UAID", "required": true, "secret": true},
+    {"key": "secret_key", "label": "Secret key", "required": true, "secret": true},
+    {"key": "api_url", "label": "API URL", "default": "https://api.yosmart.com/open/yolink/v2/api"},
+    {"key": "default_device_id", "label": "Default device ID"}
+  ],
+  "actions": [
+    {
+      "id": "open-dashboard",
+      "label": "Open YoLink",
+      "description": "Open the YoLink website while cloud actions are configured.",
+      "icon": "default/globe.png",
+      "command": ["xdg-open", "https://www.yosmart.com/"]
+    }
+  ]
+}

@@ -17,22 +17,29 @@ APP_ID = "dev.local.CozmikStudio.tray"
 ICON_NAME = "cozmik-studio"
 
 
+def _icon_argument(argv: list[str]) -> str:
+    return argv[3] if len(argv) == 4 else ICON_NAME
+
+
 def main() -> int:
     if len(sys.argv) == 2 and sys.argv[1] == "--check":
         return 0
-    if len(sys.argv) != 3:
+    if len(sys.argv) not in {3, 4}:
         return 2
     try:
         parent_pid = int(sys.argv[1])
     except ValueError:
         return 2
     socket_path = Path(sys.argv[2])
+    icon = _icon_argument(sys.argv)
 
     indicator = AyatanaAppIndicator3.Indicator.new(
         APP_ID,
-        ICON_NAME,
+        icon,
         AyatanaAppIndicator3.IndicatorCategory.APPLICATION_STATUS,
     )
+    if Path(icon).exists():
+        indicator.set_icon_full(str(Path(icon)), "Cozmik Studio")
     indicator.set_status(AyatanaAppIndicator3.IndicatorStatus.ACTIVE)
     indicator.set_title("Cozmik Studio")
     indicator.set_menu(_menu(socket_path))

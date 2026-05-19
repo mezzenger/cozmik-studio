@@ -1,0 +1,22 @@
+{
+  "id": "sengled-home",
+  "name": "Sengled Home",
+  "description": "Configuration page for Sengled Home account credentials. Public API support is unofficial and may be unreliable.",
+  "source_name": "sengled-client community API",
+  "source_url": "https://pypi.org/project/sengled-client/",
+  "config_fields": [
+    {"key": "email", "label": "Sengled email", "required": true},
+    {"key": "password", "label": "Sengled password", "required": true, "secret": true},
+    {"key": "region", "label": "Region", "kind": "select", "default": "us", "options": ["us", "eu"]},
+    {"key": "default_device_id", "label": "Default device ID"}
+  ],
+  "actions": [
+    {
+      "id": "open-sengled",
+      "label": "Open Sengled",
+      "description": "Open Sengled support while account control is configured.",
+      "icon": "default/globe.png",
+      "command": ["xdg-open", "https://us.sengled.com/"]
+    }
+  ]
+}

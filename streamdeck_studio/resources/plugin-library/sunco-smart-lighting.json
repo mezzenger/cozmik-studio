@@ -1,0 +1,23 @@
+{
+  "id": "sunco-smart-lighting",
+  "name": "Sunco Smart Lighting",
+  "description": "Configuration page for Sunco Smart Lighting account credentials. Many Sunco smart bulbs can also be managed through Smart Life/Tuya setup.",
+  "source_name": "Sunco Smart Lighting app",
+  "source_url": "https://sunco.com/pages/user-agreement-app",
+  "config_fields": [
+    {"key": "email", "label": "Sunco account email", "required": true},
+    {"key": "password", "label": "Sunco account password", "required": true, "secret": true},
+    {"key": "region", "label": "Region", "kind": "select", "default": "us", "options": ["us", "eu", "other"]},
+    {"key": "tuya_client_id", "label": "Tuya Access ID, if using Smart Life/Tuya"},
+    {"key": "tuya_client_secret", "label": "Tuya Access Secret", "secret": true}
+  ],
+  "actions": [
+    {
+      "id": "open-sunco",
+      "label": "Open Sunco",
+      "description": "Open Sunco support while account control is configured.",
+      "icon": "default/globe.png",
+      "command": ["xdg-open", "https://sunco.com/"]
+    }
+  ]
+}

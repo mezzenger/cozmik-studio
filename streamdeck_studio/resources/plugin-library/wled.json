@@ -1,0 +1,59 @@
+{
+  "id": "wled",
+  "name": "WLED",
+  "description": "Control a WLED light controller on your local network through the WLED JSON API.",
+  "source_name": "WLED JSON API",
+  "source_url": "https://kno.wled.ge/interfaces/json-api/",
+  "config_fields": [
+    {
+      "key": "host",
+      "label": "WLED host or IP",
+      "default": "wled.local",
+      "required": true,
+      "help": "Hostname or IP address, without http://."
+    }
+  ],
+  "actions": [
+    {
+      "id": "turn-on",
+      "label": "Turn On",
+      "description": "Turn the configured WLED controller on.",
+      "icon": "set_2_sleek_flat/stream_deck_core/light.png",
+      "command": ["curl", "-fsS", "-X", "POST", "http://{host}/json/state", "-H", "Content-Type: application/json", "-d", "{\"on\":true}"]
+    },
+    {
+      "id": "turn-off",
+      "label": "Turn Off",
+      "description": "Turn the configured WLED controller off.",
+      "icon": "default/power.png",
+      "command": ["curl", "-fsS", "-X", "POST", "http://{host}/json/state", "-H", "Content-Type: application/json", "-d", "{\"on\":false}"]
+    },
+    {
+      "id": "brightness",
+      "label": "Brightness",
+      "description": "Set brightness from 0 to 255.",
+      "icon": "set_2_sleek_flat/stream_deck_core/brightness.png",
+      "settings_template": {
+        "bri": "128"
+      },
+      "command": ["curl", "-fsS", "-X", "POST", "http://{host}/json/state", "-H", "Content-Type: application/json", "-d", "{\"bri\":{bri}}"]
+    },
+    {
+      "id": "preset",
+      "label": "Preset",
+      "description": "Activate a WLED preset number.",
+      "icon": "default/star.png",
+      "settings_template": {
+        "preset": "1"
+      },
+      "command": ["curl", "-fsS", "-X", "POST", "http://{host}/json/state", "-H", "Content-Type: application/json", "-d", "{\"ps\":{preset}}"]
+    },
+    {
+      "id": "open-web-ui",
+      "label": "Open Web UI",
+      "description": "Open the configured WLED controller in a browser.",
+      "icon": "default/globe.png",
+      "command": ["xdg-open", "http://{host}"]
+    }
+  ]
+}

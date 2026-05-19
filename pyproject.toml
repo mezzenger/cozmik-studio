@@ -1,6 +1,6 @@
 [project]
 name = "cozmik-studio"
-version = "0.1.0"
+version = "0.1.1"
 description = "Linux button programmer and launcher app for Stream Deck devices"
 requires-python = ">=3.11"
 dependencies = [
@@ -24,6 +24,7 @@ streamdeck_studio = [
   "resources/action-images/*/*",
   "resources/action-images/*/*/*",
   "resources/branding/*",
+  "resources/plugin-library/*",
   "resources/screensavers/*",
 ]
 

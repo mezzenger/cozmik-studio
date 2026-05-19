@@ -1,0 +1,170 @@
+{
+  "id": "desktop-tools",
+  "name": "Desktop Tools",
+  "description": "Common Linux desktop actions for session control, screenshots, launchers, files, browser, clipboard, and power menus.",
+  "actions": [
+    {
+      "id": "lock-screen",
+      "label": "Lock Screen",
+      "description": "Lock the current desktop session.",
+      "icon": "set_2_sleek_flat/system_utilities/lock.png",
+      "command": ["loginctl", "lock-session"]
+    },
+    {
+      "id": "log-out",
+      "label": "Log Out",
+      "description": "Open the GNOME log out prompt.",
+      "icon": "set_2_sleek_flat/stream_deck_core/switch_profile.png",
+      "command": ["gnome-session-quit", "--logout"]
+    },
+    {
+      "id": "power-off-menu",
+      "label": "Power Off Menu",
+      "description": "Open the GNOME power off prompt.",
+      "icon": "set_2_sleek_flat/system_utilities/power.png",
+      "command": ["gnome-session-quit", "--power-off"]
+    },
+    {
+      "id": "suspend",
+      "label": "Suspend",
+      "description": "Suspend the computer.",
+      "icon": "set_2_sleek_flat/stream_deck_core/sleep.png",
+      "command": ["systemctl", "suspend"]
+    },
+    {
+      "id": "screenshot",
+      "label": "Screenshot",
+      "description": "Open the GNOME screenshot tool.",
+      "icon": "set_2_sleek_flat/stream_deck_core/screenshot.png",
+      "command": ["gnome-screenshot", "-i"]
+    },
+    {
+      "id": "screenshot-area",
+      "label": "Screenshot Area",
+      "description": "Capture an interactive area screenshot.",
+      "icon": "default/screenshot.png",
+      "command": ["gnome-screenshot", "-a"]
+    },
+    {
+      "id": "settings",
+      "label": "Settings",
+      "description": "Open GNOME Settings.",
+      "icon": "set_2_sleek_flat/system_utilities/settings.png",
+      "command": ["gnome-control-center"]
+    },
+    {
+      "id": "display-settings",
+      "label": "Display Settings",
+      "description": "Open GNOME display settings.",
+      "icon": "set_2_sleek_flat/system_utilities/monitor.png",
+      "command": ["gnome-control-center", "display"]
+    },
+    {
+      "id": "sound-settings",
+      "label": "Sound Settings",
+      "description": "Open GNOME sound settings.",
+      "icon": "default/volume-up.png",
+      "command": ["gnome-control-center", "sound"]
+    },
+    {
+      "id": "wifi-settings",
+      "label": "Wi-Fi Settings",
+      "description": "Open GNOME Wi-Fi settings.",
+      "icon": "set_2_sleek_flat/system_utilities/wifi.png",
+      "command": ["gnome-control-center", "wifi"]
+    },
+    {
+      "id": "bluetooth-settings",
+      "label": "Bluetooth Settings",
+      "description": "Open GNOME Bluetooth settings.",
+      "icon": "set_2_sleek_flat/system_utilities/bluetooth.png",
+      "command": ["gnome-control-center", "bluetooth"]
+    },
+    {
+      "id": "terminal",
+      "label": "Terminal",
+      "description": "Open a terminal using xdg-terminal-exec.",
+      "icon": "set_2_sleek_flat/system_utilities/terminal.png",
+      "command": ["xdg-terminal-exec"]
+    },
+    {
+      "id": "files-home",
+      "label": "Files: Home",
+      "description": "Open the home folder.",
+      "icon": "default/home.png",
+      "command": ["xdg-open", "{home}"],
+      "settings_template": {
+        "path": "{home}"
+      }
+    },
+    {
+      "id": "files-downloads",
+      "label": "Files: Downloads",
+      "description": "Open the Downloads folder.",
+      "icon": "set_2_sleek_flat/system_utilities/file_manager.png",
+      "command": ["xdg-open", "{home}/Downloads"]
+    },
+    {
+      "id": "open-path",
+      "label": "Open Path",
+      "description": "Open a configured file, folder, or URL through xdg-open.",
+      "icon": "set_2_sleek_flat/stream_deck_core/folder.png",
+      "settings_template": {
+        "path": "/home/user"
+      },
+      "command": ["xdg-open", "{path}"]
+    },
+    {
+      "id": "open-url",
+      "label": "Open URL",
+      "description": "Open a configured URL in the default browser.",
+      "icon": "default/globe.png",
+      "settings_template": {
+        "url": "https://example.com"
+      },
+      "command": ["xdg-open", "{url}"]
+    },
+    {
+      "id": "browser",
+      "label": "Default Browser",
+      "description": "Open the default web browser.",
+      "icon": "neon/globe.png",
+      "command": ["xdg-open", "https://www.google.com"]
+    },
+    {
+      "id": "copy-text",
+      "label": "Copy Text",
+      "description": "Copy configured text to the clipboard with wl-copy.",
+      "icon": "default/image.png",
+      "settings_template": {
+        "text": "Hello from Cozmik"
+      },
+      "command": ["wl-copy", "{text}"]
+    },
+    {
+      "id": "show-notification",
+      "label": "Notification",
+      "description": "Show a configured desktop notification.",
+      "icon": "default/chat.png",
+      "settings_template": {
+        "title": "Cozmik Studio",
+        "message": "Desktop Tools action ran"
+      },
+      "command": ["notify-send", "{title}", "{message}"]
+    },
+    {
+      "id": "do-not-disturb-on",
+      "label": "Do Not Disturb On",
+      "description": "Enable GNOME Do Not Disturb.",
+      "icon": "default/mute.png",
+      "command": ["gsettings", "set", "org.gnome.desktop.notifications", "show-banners", "false"]
+    },
+    {
+      "id": "do-not-disturb-off",
+      "label": "Do Not Disturb Off",
+      "description": "Disable GNOME Do Not Disturb.",
+      "icon": "default/chat.png",
+      "command": ["gsettings", "set", "org.gnome.desktop.notifications", "show-banners", "true"]
+    }
+  ]
+}

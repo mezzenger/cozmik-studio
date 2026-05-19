@@ -1,0 +1,23 @@
+{
+  "id": "tuya-cloud",
+  "name": "Tuya Cloud",
+  "description": "Configuration page for Tuya Cloud API credentials and project setup.",
+  "source_name": "Tuya Cloud API",
+  "source_url": "https://developer.tuya.com/en/docs/iot/authentication-method?id=Ka49gbaxjygox",
+  "config_fields": [
+    {"key": "data_center", "label": "Data center", "kind": "select", "default": "Western America", "options": ["China", "Western America", "Eastern America", "Central Europe", "Western Europe", "India"]},
+    {"key": "client_id", "label": "Access ID / Client ID", "required": true},
+    {"key": "client_secret", "label": "Access Secret / Client Secret", "required": true, "secret": true},
+    {"key": "app_account", "label": "Linked Tuya app account", "help": "The Tuya Smart account linked to this cloud project."},
+    {"key": "default_device_id", "label": "Default device ID"}
+  ],
+  "actions": [
+    {
+      "id": "open-cloud-projects",
+      "label": "Open Tuya Cloud",
+      "description": "Open the Tuya Cloud project dashboard to finish linking app accounts and devices.",
+      "icon": "default/globe.png",
+      "command": ["xdg-open", "https://platform.tuya.com/cloud/"]
+    }
+  ]
+}

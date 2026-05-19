@@ -6,6 +6,7 @@ from pathlib import Path
 
 from .actions import MAC_APP_LAUNCHERS, _mac_app_name, _translated_launcher
 from .model import ButtonConfig, Profile
+from .plugins import PluginError, get_plugin_action, parse_plugin_target
 
 
 PAGE_SENTINELS = {"__previous__", "__next__", "__parent__"}
@@ -92,7 +93,7 @@ def _button_issues(profile: Profile, page_name: str, index: int, config: ButtonC
             issues.append(_issue(page_name, index, config, "page action has no target"))
         elif target not in PAGE_SENTINELS and target not in profile.pages:
             issues.append(_issue(page_name, index, config, f"page target is missing: {target}"))
-    elif config.action_type in {"command", "shell", "url", "file", "text", "media", "shortcut", "keys"} and not target:
+    elif config.action_type in {"command", "shell", "url", "file", "text", "media", "shortcut", "keys", "plugin"} and not target:
         issues.append(_issue(page_name, index, config, f"{config.action_type} action has no target"))
 
     if config.action_type == "file" and target:
@@ -107,6 +108,15 @@ def _button_issues(profile: Profile, page_name: str, index: int, config: ButtonC
                 issues.append(_issue(page_name, index, config, message))
         elif not Path(target).expanduser().exists():
             issues.append(_issue(page_name, index, config, "file target does not exist on this computer"))
+
+    if config.action_type == "plugin" and target:
+        try:
+            plugin_id, action_id, _settings = parse_plugin_target(target)
+        except PluginError as exc:
+            issues.append(_issue(page_name, index, config, str(exc)))
+        else:
+            if not get_plugin_action(plugin_id, action_id):
+                issues.append(_issue(page_name, index, config, f"plugin action is not installed: {plugin_id}.{action_id}"))
 
     if config.action_type == "none" and (config.label or config.subtitle or config.image_path or config.background_image_path or config.action_image_path):
         issues.append(_issue(page_name, index, config, "imported button has no supported action yet"))

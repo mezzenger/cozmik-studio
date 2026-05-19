@@ -11,6 +11,9 @@ from .model import MCP_PROFILE_ID, ButtonConfig, Profile, load_profile_by_id, sa
 
 PROTOCOL_VERSION = "2024-11-05"
 
+# Action types whose targets may contain credentials, private paths, or sensitive text.
+_REDACTED_ACTION_TYPES = {"text", "command", "shell", "file", "plugin"}
+
 
 def list_buttons(profile: Profile | None = None) -> list[dict[str, Any]]:
     profile = profile or load_profile_by_id(MCP_PROFILE_ID)
@@ -24,15 +27,29 @@ def list_buttons(profile: Profile | None = None) -> list[dict[str, Any]]:
                 "label": config.label,
                 "subtitle": config.subtitle,
                 "action_type": config.action_type,
-                "target": config.target if config.action_type not in {"text"} else "[redacted]",
+                "target": "[redacted]" if config.action_type in _REDACTED_ACTION_TYPES else config.target,
             }
         )
     return buttons
 
 
-def activate_button(button: int, profile: Profile | None = None) -> str:
-    profile = profile or load_profile_by_id(MCP_PROFILE_ID)
-    index = button - 1
+def activate_button(button: int | None = None, label: str | None = None, profile: Profile | None = None) -> str:
+    should_persist = profile is None
+    if profile is None:
+        profile = load_profile_by_id(MCP_PROFILE_ID)
+    if label is not None and button is None:
+        needle = label.strip().casefold()
+        match = next(
+            (int(idx) for idx, cfg in profile.current_buttons().items() if cfg.label.strip().casefold() == needle),
+            None,
+        )
+        if match is None:
+            raise ActionError(f"No button with label '{label}'.")
+        index = match
+    else:
+        if button is None:
+            raise ActionError("Provide button number or label.")
+        index = button - 1
     if index < 0 or index >= profile.button_count():
         raise ActionError(f"Button must be between 1 and {profile.button_count()}.")
     config = profile.get_button(index)
@@ -42,9 +59,31 @@ def activate_button(button: int, profile: Profile | None = None) -> str:
         if config.target not in profile.pages:
             raise ActionError("Page target is not available.")
         profile.set_current_page(config.target)
-        save_profile_by_id(MCP_PROFILE_ID, profile)
+        if should_persist:
+            save_profile_by_id(MCP_PROFILE_ID, profile)
         return f"Switched page: {profile.page_names.get(config.target, config.target)}"
     return run_action(config)
+
+
+def switch_page(page: str, profile: Profile | None = None) -> str:
+    should_persist = profile is None
+    if profile is None:
+        profile = load_profile_by_id(MCP_PROFILE_ID)
+    if page in profile.pages:
+        page_id = page
+    else:
+        needle = page.strip().casefold()
+        page_id = next(
+            (pid for pid, name in profile.page_names.items() if name.strip().casefold() == needle),
+            None,
+        )
+        if page_id is None:
+            available = ", ".join(f"{pid!r} ({name!r})" for pid, name in profile.page_names.items())
+            raise ActionError(f"No page matching '{page}'. Available: {available}")
+    profile.set_current_page(page_id)
+    if should_persist:
+        save_profile_by_id(MCP_PROFILE_ID, profile)
+    return f"Switched page: {profile.page_names.get(page_id, page_id)}"
 
 
 def handle_request(message: dict[str, Any]) -> dict[str, Any] | None:
@@ -57,7 +96,7 @@ def handle_request(message: dict[str, Any]) -> dict[str, Any] | None:
             result = {
                 "protocolVersion": PROTOCOL_VERSION,
                 "capabilities": {"tools": {}},
-                "serverInfo": {"name": "cozmik-studio", "version": "0.1.0"},
+                "serverInfo": {"name": "cozmik-studio", "version": "0.1.1"},
             }
         elif method == "tools/list":
             result = {"tools": _tool_definitions()}
@@ -103,7 +142,14 @@ def _call_tool(name: str, arguments: Any) -> dict[str, Any]:
     elif name == "list_buttons":
         payload = list_buttons()
     elif name == "activate_button":
-        payload = {"message": activate_button(int(arguments.get("button", 0)))}
+        raw_button = arguments.get("button")
+        raw_label = arguments.get("label")
+        payload = {"message": activate_button(
+            button=int(raw_button) if raw_button is not None else None,
+            label=str(raw_label) if raw_label is not None else None,
+        )}
+    elif name == "switch_page":
+        payload = {"message": switch_page(str(arguments.get("page", "")))}
     else:
         raise ActionError(f"Unknown tool: {name}")
     return {"content": [{"type": "text", "text": json.dumps(payload, indent=2, sort_keys=True)}]}
@@ -122,12 +168,24 @@ def _tool_definitions() -> list[dict[str, Any]]:
             "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
         },
         {
-            "name": "activate_button",
-            "description": "Activate a configured MCP Deck button by 1-based button number.",
+            "name": "switch_page",
+            "description": "Switch the current MCP Deck page by page ID or page name. Use get_profile to see available pages.",
             "inputSchema": {
                 "type": "object",
-                "properties": {"button": {"type": "integer", "minimum": 1}},
-                "required": ["button"],
+                "properties": {"page": {"type": "string"}},
+                "required": ["page"],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "name": "activate_button",
+            "description": "Activate a configured MCP Deck button by 1-based number or label. Provide exactly one of button or label.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "button": {"type": "integer", "minimum": 1},
+                    "label": {"type": "string"},
+                },
                 "additionalProperties": False,
             },
         },

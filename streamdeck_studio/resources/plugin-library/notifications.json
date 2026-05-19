@@ -1,0 +1,19 @@
+{
+  "id": "notifications",
+  "name": "Notifications",
+  "description": "Simple notification actions for testing buttons and workflow markers.",
+  "actions": [
+    {
+      "id": "ping",
+      "label": "Ping",
+      "description": "Show a desktop notification.",
+      "command": ["notify-send", "Cozmik Studio", "Plugin action ran"]
+    },
+    {
+      "id": "settings-json",
+      "label": "Show Settings JSON",
+      "description": "Show the action settings JSON in a desktop notification.",
+      "command": ["notify-send", "Cozmik Plugin Settings", "{settings_json}"]
+    }
+  ]
+}

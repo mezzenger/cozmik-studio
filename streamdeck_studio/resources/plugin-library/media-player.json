@@ -1,0 +1,28 @@
+{
+  "id": "media-player",
+  "name": "Media Player",
+  "description": "Control Spotify, browsers, VLC, and other MPRIS-compatible players through playerctl.",
+  "source_name": "altdesktop/playerctl",
+  "source_url": "https://github.com/altdesktop/playerctl",
+  "source_stars": 2800,
+  "actions": [
+    {
+      "id": "play-pause",
+      "label": "Play/Pause",
+      "description": "Toggle playback in the active MPRIS media player.",
+      "command": ["playerctl", "play-pause"]
+    },
+    {
+      "id": "next",
+      "label": "Next Track",
+      "description": "Skip to the next track.",
+      "command": ["playerctl", "next"]
+    },
+    {
+      "id": "previous",
+      "label": "Previous Track",
+      "description": "Return to the previous track.",
+      "command": ["playerctl", "previous"]
+    }
+  ]
+}

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 from datetime import datetime
 from typing import Any
 import json
@@ -12,6 +13,7 @@ import sys
 import tempfile
 import threading
 import time
+import webbrowser
 
 import gi
 
@@ -35,6 +37,8 @@ from .model import (
     MCP_PROFILE_ID,
     MCP_PROFILE_NAME,
     NEW_PROFILE_NAME,
+    STARTUP_MODES,
+    THEME_MODES,
     ButtonConfig,
     Profile,
     TUTORIAL_TARGET_PREFIX,
@@ -47,6 +51,9 @@ from .model import (
     load_active_profile,
     load_default_profile_id,
     load_profile_by_id,
+    load_start_minimized,
+    load_startup_mode,
+    load_theme_mode,
     profile_assets_dir,
     profile_id_from_name,
     profile_action_icons_dir,
@@ -57,6 +64,21 @@ from .model import (
     save_default_profile_id,
     save_profile,
     save_profile_by_id,
+    save_start_minimized,
+    save_startup_mode,
+    save_theme_mode,
+)
+from .plugins import (
+    PluginAction,
+    PluginError,
+    install_library_plugin,
+    list_library_plugins,
+    list_plugin_actions,
+    list_plugin_actions_for,
+    load_plugin_config,
+    plugin_config_fields,
+    save_plugin_config,
+    uninstall_plugin,
 )
 
 
@@ -123,11 +145,15 @@ class KeyButton(Gtk.Button):
 
 
 class MainWindow(Adw.ApplicationWindow):
-    def __init__(self, app: Adw.Application) -> None:
+    def __init__(self, app: Adw.Application, start_minimized: bool = False) -> None:
         super().__init__(application=app, title=__app_name__)
         self.set_default_size(980, 640)
 
         self.startup_message = ""
+        self._start_minimized = start_minimized
+        self.startup_mode = "minimized" if start_minimized else load_startup_mode()
+        self.start_minimized = start_minimized or load_start_minimized()
+        self.theme_mode = load_theme_mode()
         self.profile_id, self.profile = self._load_profile()
         self.default_profile_id = load_default_profile_id()
         self.deck = StreamDeckController()
@@ -158,6 +184,23 @@ class MainWindow(Adw.ApplicationWindow):
         self._connect_deck()
         if self.startup_message:
             self._set_status(self.startup_message)
+
+    def show_at_startup(self) -> None:
+        if self._start_minimized or self.start_minimized:
+            self._show_minimized_at_startup()
+        else:
+            self.present()
+
+    def _show_minimized_at_startup(self) -> None:
+        if self._tray_available:
+            self._hide_to_tray()
+            return
+        self.present()
+        try:
+            self.minimize()
+            self._set_status("Started minimized.", "success")
+        except AttributeError:
+            self._set_status("Started minimized requested, but this desktop does not support minimizing at startup.", "error")
 
     def do_close_request(self):
         self.deck.stop_screensaver_preview()
@@ -354,6 +397,8 @@ class MainWindow(Adw.ApplicationWindow):
         file_group = self._toolbar_group()
         file_group.append(self._icon_button("document-open-symbolic", "Import Profile", self._import_profile))
         file_group.append(self._icon_button("document-save-as-symbolic", "Export Profile", self._export_profile))
+        file_group.append(self._labeled_toolbar_button("Plugins", "Install, use, and remove plugins", self._show_plugin_library))
+        file_group.append(self._labeled_toolbar_button("Config", "Configure app startup and preferences", self._show_app_config))
         file_group.append(self._icon_button("emblem-favorite-symbolic", "Make Default Profile", self._make_default_profile))
         self.mcp_toggle = self._toggle_button("MCP", self._mcp_toggled)
         file_group.append(self.mcp_toggle)
@@ -370,6 +415,15 @@ class MainWindow(Adw.ApplicationWindow):
         button = Gtk.Button(icon_name=icon_name)
         button.add_css_class("toolbar-button")
         button.set_size_request(43, 32)
+        button.set_tooltip_text(tooltip)
+        button.connect("clicked", lambda *_args: callback())
+        return button
+
+    def _labeled_toolbar_button(self, label: str, tooltip: str, callback) -> Gtk.Button:
+        button = Gtk.Button(label=label)
+        button.add_css_class("toolbar-button")
+        button.add_css_class("text-toolbar-button")
+        button.set_size_request(78, 32)
         button.set_tooltip_text(tooltip)
         button.connect("clicked", lambda *_args: callback())
         return button
@@ -435,6 +489,89 @@ class MainWindow(Adw.ApplicationWindow):
                 self._set_status(info.error)
         self._select_button(min(self.selected_index, self.profile.button_count() - 1))
 
+    def _startup_mode_changed(self) -> None:
+        if self._updating_editor or not hasattr(self, "start_minimized_check"):
+            return
+        start_minimized = self.start_minimized_check.get_active()
+        self.start_minimized = start_minimized
+        self.startup_mode = "minimized" if start_minimized else "normal"
+        try:
+            save_start_minimized(start_minimized)
+        except OSError as exc:
+            self._set_status(f"Could not save startup preference: {exc}", "error")
+            return
+        label = "minimized" if start_minimized else "normally"
+        self._set_status(f"Cozmik Studio will start {label} next time.", "success")
+
+    def _theme_mode_changed(self) -> None:
+        if self._updating_editor or not hasattr(self, "theme_mode_combo"):
+            return
+        theme_mode = self.theme_mode_combo.get_active_id() or "system"
+        if theme_mode not in THEME_MODES:
+            theme_mode = "system"
+        self.theme_mode = theme_mode
+        try:
+            save_theme_mode(theme_mode)
+        except OSError as exc:
+            self._set_status(f"Could not save theme preference: {exc}", "error")
+            return
+        self._set_status(f"Theme preference saved: {theme_mode}.", "success")
+
+    def _show_app_config(self) -> None:
+        dialog = Gtk.Dialog(title="App Config", transient_for=self, modal=True)
+        dialog.add_button("Close", Gtk.ResponseType.CLOSE)
+        box = dialog.get_content_area()
+        box.set_spacing(12)
+        box.set_margin_top(12)
+        box.set_margin_bottom(12)
+        box.set_margin_start(12)
+        box.set_margin_end(12)
+        box.append(self._global_config_tile())
+        dialog.connect("response", lambda dialog, _response: dialog.destroy())
+        dialog.present()
+
+    def _global_config_tile(self) -> Gtk.Box:
+        tile = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        tile.add_css_class("config-tile")
+        title = Gtk.Label(label="Global Settings", xalign=0)
+        title.add_css_class("config-tile-title")
+        description = Gtk.Label(label="App-wide preferences that apply until changed.", xalign=0)
+        description.set_wrap(True)
+        description.add_css_class("config-tile-description")
+        tile.append(title)
+        tile.append(description)
+        tile.append(self._start_minimized_row())
+        tile.append(self._theme_mode_row())
+        return tile
+
+    def _start_minimized_row(self) -> Gtk.Box:
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        row.add_css_class("config-tile-row")
+        self.start_minimized_check = Gtk.CheckButton(label="Start minimized")
+        self.start_minimized_check.add_css_class("config-check")
+        self.start_minimized_check.set_active(self.start_minimized)
+        self.start_minimized_check.set_tooltip_text("Start hidden in the tray when available, otherwise start minimized.")
+        self.start_minimized_check.connect("toggled", lambda *_args: self._startup_mode_changed())
+        row.append(self.start_minimized_check)
+        return row
+
+    def _theme_mode_row(self) -> Gtk.Box:
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        row.add_css_class("config-tile-row")
+        label = Gtk.Label(label="Dark or Light", xalign=0)
+        label.add_css_class("config-tile-label")
+        row.append(label)
+        self.theme_mode_combo = Gtk.ComboBoxText()
+        self.theme_mode_combo.append("system", "System")
+        self.theme_mode_combo.append("dark", "Dark")
+        self.theme_mode_combo.append("light", "Light")
+        self.theme_mode_combo.set_active_id(self.theme_mode if self.theme_mode in THEME_MODES else "system")
+        self.theme_mode_combo.set_tooltip_text("Theme preference placeholder for global app styling.")
+        self.theme_mode_combo.connect("changed", lambda *_args: self._theme_mode_changed())
+        self.theme_mode_combo.set_hexpand(True)
+        row.append(self.theme_mode_combo)
+        return row
+
     def _start_tray_indicator(self) -> None:
         if not _tray_indicator_available():
             self._set_status("Panel icon unavailable: install Ayatana AppIndicator and enable GNOME AppIndicator support.", "error")
@@ -446,7 +583,14 @@ class MainWindow(Adw.ApplicationWindow):
             thread = threading.Thread(target=self._tray_command_loop, daemon=True)
             thread.start()
             self._tray_process = subprocess.Popen(
-                [sys.executable, "-m", "streamdeck_studio.tray_indicator", str(os.getpid()), str(socket_path)],
+                [
+                    sys.executable,
+                    "-m",
+                    "streamdeck_studio.tray_indicator",
+                    str(os.getpid()),
+                    str(socket_path),
+                    str(Path(__file__).parent / "resources" / "branding" / "cozmik-studio-icon.png"),
+                ],
                 start_new_session=True,
             )
         except OSError as exc:
@@ -856,12 +1000,311 @@ class MainWindow(Adw.ApplicationWindow):
         if action_type == "page":
             self._choose_page_target()
             return
+        if action_type == "plugin":
+            self._choose_plugin_target()
+            return
         if action_type not in {"file", "command"}:
-            self._set_status("Browse is available for file, command, and page actions.")
+            self._set_status("Browse is available for file, command, page, and plugin actions.")
             return
         dialog = Gtk.FileChooserNative.new("Choose target", self, Gtk.FileChooserAction.OPEN, "Choose", "Cancel")
         dialog.connect("response", self._on_file_chosen)
         dialog.show()
+
+    def _choose_plugin_target(self) -> None:
+        actions = list_plugin_actions()
+        if not actions:
+            self._set_status(f"No plugins found in {config_dir() / 'plugins'}.")
+            return
+        self._show_plugin_action_dialog(actions, title="Use Installed Plugin Action")
+
+    def _show_plugin_action_dialog(self, actions: list[PluginAction], title: str) -> None:
+        dialog = Gtk.Dialog(title=title, transient_for=self, modal=True)
+        dialog.add_button("Close", Gtk.ResponseType.CLOSE)
+        box = dialog.get_content_area()
+        box.set_spacing(10)
+        box.set_margin_top(12)
+        box.set_margin_bottom(12)
+        box.set_margin_start(12)
+        box.set_margin_end(12)
+        selected = self.profile.get_button(self.selected_index)
+        heading = Gtk.Label(label=f"Apply to selected button {self.selected_index + 1}: {selected.label or 'Untitled'}", xalign=0)
+        heading.add_css_class("plugin-heading")
+        box.append(heading)
+        hint = Gtk.Label(label="Choose an action. Settings templates are copied into the Target field for editing.", xalign=0)
+        hint.set_wrap(True)
+        hint.add_css_class("dim-label")
+        box.append(hint)
+        listbox = Gtk.ListBox()
+        listbox.add_css_class("boxed-list")
+        listbox.set_selection_mode(Gtk.SelectionMode.NONE)
+        for action in actions:
+            listbox.append(self._plugin_action_row(action, dialog))
+        scrolled = Gtk.ScrolledWindow()
+        scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scrolled.set_min_content_width(520)
+        scrolled.set_min_content_height(260)
+        scrolled.set_child(listbox)
+        box.append(scrolled)
+        dialog.connect("response", lambda dialog, _response: dialog.destroy())
+        dialog.present()
+
+    def _plugin_action_row(self, action: PluginAction, dialog: Gtk.Dialog) -> Gtk.ListBoxRow:
+        row = Gtk.ListBoxRow()
+        row.set_selectable(False)
+        outer = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        outer.set_margin_top(10)
+        outer.set_margin_bottom(10)
+        outer.set_margin_start(10)
+        outer.set_margin_end(10)
+        text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        text.set_hexpand(True)
+        name = Gtk.Label(xalign=0)
+        name.set_markup(f"<b>{GLib.markup_escape_text(action.plugin_name + ': ' + action.label)}</b>")
+        target = Gtk.Label(label=action.qualified_id, xalign=0)
+        target.add_css_class("dim-label")
+        description = Gtk.Label(label=action.description or "No description.", xalign=0)
+        description.set_wrap(True)
+        text.append(name)
+        text.append(target)
+        text.append(description)
+        apply_button = Gtk.Button(label="Use on selected button")
+        apply_button.connect("clicked", lambda _button: self._apply_plugin_action(action, dialog))
+        outer.append(text)
+        outer.append(apply_button)
+        row.set_child(outer)
+        return row
+
+    def _apply_plugin_action(self, action: PluginAction, dialog: Gtk.Dialog | None = None) -> None:
+        self.action_combo.set_active(ACTION_TYPES.index("plugin"))
+        self._set_text_view(action.target_template())
+        config = self.profile.get_button(self.selected_index)
+        if not config.label:
+            self.label_entry.set_text(action.label)
+        if not config.subtitle:
+            self.subtitle_entry.set_text(action.plugin_name)
+        icon_path = self._plugin_action_icon_path(action)
+        if icon_path:
+            self.action_image_entry.set_text(str(icon_path))
+        if dialog:
+            dialog.destroy()
+        self._set_status(f"Selected plugin action: {action.plugin_name} / {action.label}", "success")
+
+    def _plugin_action_icon_path(self, action: PluginAction) -> Path | None:
+        if not action.icon:
+            return None
+        path = Path(action.icon).expanduser()
+        if path.is_absolute() and path.exists():
+            return path
+        resource_path = Path(__file__).parent / "resources" / "action-images" / action.icon
+        if resource_path.exists():
+            return resource_path
+        plugin_path = action.plugin_dir / action.icon
+        if plugin_path.exists():
+            return plugin_path
+        return None
+
+    def _show_plugin_library(self) -> None:
+        dialog = Gtk.Dialog(title="Plugins", transient_for=self, modal=True)
+        dialog.add_button("Close", Gtk.ResponseType.CLOSE)
+        box = dialog.get_content_area()
+        box.set_spacing(10)
+        box.set_margin_top(12)
+        box.set_margin_bottom(12)
+        box.set_margin_start(12)
+        box.set_margin_end(12)
+        selected = self.profile.get_button(self.selected_index)
+        heading = Gtk.Label(label=f"Selected button {self.selected_index + 1}: {selected.label or 'Untitled'}", xalign=0)
+        heading.add_css_class("plugin-heading")
+        box.append(heading)
+        hint = Gtk.Label(
+            label="Install a plugin, then use one of its actions on the selected button. Installed plugins can also be removed here.",
+            xalign=0,
+        )
+        hint.set_wrap(True)
+        hint.add_css_class("dim-label")
+        box.append(hint)
+        listbox = Gtk.ListBox()
+        listbox.add_css_class("boxed-list")
+        listbox.set_selection_mode(Gtk.SelectionMode.NONE)
+        scrolled = Gtk.ScrolledWindow()
+        scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scrolled.set_min_content_width(520)
+        scrolled.set_min_content_height(260)
+        scrolled.set_child(listbox)
+        box.append(scrolled)
+        self._populate_plugin_library_list(listbox)
+        dialog.connect("response", lambda dialog, _response: dialog.destroy())
+        dialog.present()
+
+    def _populate_plugin_library_list(self, listbox: Gtk.ListBox) -> None:
+        child = listbox.get_first_child()
+        while child:
+            next_child = child.get_next_sibling()
+            listbox.remove(child)
+            child = next_child
+        items = list_library_plugins()
+        if not items:
+            row = Gtk.ListBoxRow()
+            row.set_selectable(False)
+            row.set_child(Gtk.Label(label="No bundled plugins found.", xalign=0))
+            listbox.append(row)
+            return
+        for item in items:
+            row = Gtk.ListBoxRow()
+            row.set_selectable(False)
+            outer = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+            outer.set_margin_top(10)
+            outer.set_margin_bottom(10)
+            outer.set_margin_start(10)
+            outer.set_margin_end(10)
+            text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+            text.set_hexpand(True)
+            name = Gtk.Label(xalign=0)
+            name.set_markup(f"<b>{GLib.markup_escape_text(item.name)}</b>")
+            description = Gtk.Label(label=item.description or "No description.", xalign=0)
+            description.set_wrap(True)
+            status = "Installed" if item.installed else "Not installed"
+            config_label = f", {item.config_field_count} config fields" if item.config_field_count else ""
+            count = Gtk.Label(label=f"{status} - {item.action_count} actions{config_label}", xalign=0)
+            count.add_css_class("dim-label")
+            text.append(name)
+            text.append(description)
+            text.append(count)
+            if item.source_url:
+                source = Gtk.Label(label=self._plugin_source_label(item.source_name, item.source_stars), xalign=0)
+                source.add_css_class("dim-label")
+                text.append(source)
+            controls = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+            install = Gtk.Button(label="Installed" if item.installed else "Install")
+            install.set_sensitive(not item.installed)
+            install.connect("clicked", lambda _button, plugin_id=item.plugin_id: self._install_library_plugin(plugin_id, listbox))
+            controls.append(install)
+            if item.installed:
+                if plugin_config_fields(item.plugin_id):
+                    configure = Gtk.Button(label="Configure")
+                    configure.connect("clicked", lambda _button, plugin_id=item.plugin_id, name=item.name: self._configure_plugin(plugin_id, name))
+                    controls.append(configure)
+                use = Gtk.Button(label="Use on selected button")
+                use.connect("clicked", lambda _button, plugin_id=item.plugin_id: self._choose_installed_plugin_action(plugin_id))
+                controls.append(use)
+                remove = Gtk.Button(label="Remove")
+                remove.connect("clicked", lambda _button, plugin_id=item.plugin_id: self._remove_plugin(plugin_id, listbox))
+                controls.append(remove)
+            outer.append(text)
+            if item.source_url:
+                source_button = Gtk.Button(label="Source")
+                source_button.connect("clicked", lambda _button, url=item.source_url: self._open_plugin_source(url))
+                outer.append(source_button)
+            outer.append(controls)
+            row.set_child(outer)
+            listbox.append(row)
+
+    def _plugin_source_label(self, source_name: str, source_stars: int) -> str:
+        if source_name and source_stars:
+            return f"Re-engineered from {source_name} ({source_stars:,} GitHub stars)"
+        if source_name:
+            return f"Re-engineered from {source_name}"
+        return "Re-engineered from a compatible integration source"
+
+    def _install_library_plugin(self, plugin_id: str, listbox: Gtk.ListBox) -> None:
+        try:
+            install_library_plugin(plugin_id)
+        except PluginError as exc:
+            self._set_status(str(exc), "error")
+            return
+        except OSError as exc:
+            self._set_status(f"Could not install plugin: {exc}", "error")
+            return
+        self._populate_plugin_library_list(listbox)
+        self._set_status(f"Installed plugin: {plugin_id}", "success")
+
+    def _remove_plugin(self, plugin_id: str, listbox: Gtk.ListBox) -> None:
+        try:
+            uninstall_plugin(plugin_id)
+        except OSError as exc:
+            self._set_status(f"Could not remove plugin: {exc}", "error")
+            return
+        self._populate_plugin_library_list(listbox)
+        self._set_status(f"Removed plugin: {plugin_id}", "success")
+
+    def _configure_plugin(self, plugin_id: str, plugin_name: str) -> None:
+        fields = plugin_config_fields(plugin_id)
+        if not fields:
+            self._set_status(f"{plugin_name} has no configuration fields.")
+            return
+        values = load_plugin_config(plugin_id)
+        dialog = Gtk.Dialog(title=f"Configure {plugin_name}", transient_for=self, modal=True)
+        dialog.add_button("Cancel", Gtk.ResponseType.CANCEL)
+        dialog.add_button("Save", Gtk.ResponseType.ACCEPT)
+        box = dialog.get_content_area()
+        box.set_spacing(10)
+        box.set_margin_top(12)
+        box.set_margin_bottom(12)
+        box.set_margin_start(12)
+        box.set_margin_end(12)
+        note = Gtk.Label(label="Credentials are saved locally in your Cozmik Studio config directory.", xalign=0)
+        note.set_wrap(True)
+        note.add_css_class("dim-label")
+        box.append(note)
+        form = Gtk.Grid(column_spacing=8, row_spacing=8)
+        widgets: dict[str, Gtk.Widget] = {}
+        for row, field in enumerate(fields):
+            label = Gtk.Label(label=f"{field.label}{' *' if field.required else ''}", xalign=0)
+            form.attach(label, 0, row, 1, 1)
+            if field.kind == "select" and field.options:
+                widget = Gtk.ComboBoxText()
+                for option in field.options:
+                    widget.append(option, option)
+                active_value = str(values.get(field.key, field.default))
+                widget.set_active_id(active_value if active_value in field.options else field.options[0])
+            else:
+                widget = Gtk.Entry()
+                widget.set_text(str(values.get(field.key, field.default)))
+                widget.set_visibility(not field.secret)
+            widget.set_hexpand(True)
+            if field.help:
+                widget.set_tooltip_text(field.help)
+            widgets[field.key] = widget
+            form.attach(widget, 1, row, 1, 1)
+        box.append(form)
+        dialog.connect("response", lambda dialog, response: self._on_plugin_config_response(dialog, response, plugin_id, plugin_name, widgets))
+        dialog.present()
+
+    def _on_plugin_config_response(
+        self,
+        dialog: Gtk.Dialog,
+        response: int,
+        plugin_id: str,
+        plugin_name: str,
+        widgets: dict[str, Gtk.Widget],
+    ) -> None:
+        if response == Gtk.ResponseType.ACCEPT:
+            values: dict[str, Any] = {}
+            for key, widget in widgets.items():
+                if isinstance(widget, Gtk.ComboBoxText):
+                    values[key] = widget.get_active_id() or ""
+                elif isinstance(widget, Gtk.Entry):
+                    values[key] = widget.get_text()
+            try:
+                save_plugin_config(plugin_id, values)
+            except OSError as exc:
+                self._set_status(f"Could not save {plugin_name} config: {exc}", "error")
+            else:
+                self._set_status(f"Saved {plugin_name} configuration.", "success")
+        dialog.destroy()
+
+    def _choose_installed_plugin_action(self, plugin_id: str) -> None:
+        actions = list_plugin_actions_for(plugin_id)
+        if not actions:
+            self._set_status(f"No installed actions found for plugin: {plugin_id}", "error")
+            return
+        self._show_plugin_action_dialog(actions, title=f"Use {actions[0].plugin_name}")
+
+    def _open_plugin_source(self, url: str) -> None:
+        if webbrowser.open(url, new=2):
+            self._set_status(f"Opened plugin source: {url}", "success")
+        else:
+            self._set_status(f"Could not open plugin source: {url}", "error")
 
     def _on_file_chosen(self, dialog: Gtk.FileChooserNative, response: int) -> None:
         if response == Gtk.ResponseType.ACCEPT:
@@ -1766,6 +2209,10 @@ class MainWindow(Adw.ApplicationWindow):
                 color: #f8fafc;
                 font-weight: 700;
             }
+            .text-toolbar-button {
+                min-width: 78px;
+                padding: 0 8px;
+            }
             .file-button {
                 min-width: 43px;
                 min-height: 32px;
@@ -1806,6 +2253,50 @@ class MainWindow(Adw.ApplicationWindow):
                 background: #eff6ff;
             }
             .key-label { font-weight: 600; font-size: 12px; }
+            .plugin-heading {
+                font-weight: 800;
+                color: #0f172a;
+            }
+            .config-tile {
+                padding: 12px;
+                background: #334155;
+                border: 1px solid #475569;
+                border-radius: 8px;
+            }
+            .config-tile-title {
+                font-weight: 800;
+                font-size: 13px;
+                color: #f8fafc;
+            }
+            .config-tile-description {
+                color: #cbd5e1;
+                font-size: 12px;
+                font-weight: 600;
+            }
+            .config-tile-label {
+                color: #f8fafc;
+                font-weight: 700;
+                font-size: 13px;
+            }
+            .config-tile-row label {
+                color: #f8fafc;
+                font-size: 13px;
+                font-weight: 700;
+            }
+            .config-check label {
+                color: #f8fafc;
+                font-size: 13px;
+                font-weight: 700;
+            }
+            .config-tile combobox,
+            .config-tile combobox button,
+            .config-tile combobox box,
+            .config-tile combobox label {
+                color: #f8fafc;
+                background: #475569;
+                font-size: 13px;
+                font-weight: 700;
+            }
             .tutorial-window {
                 background: #f8fafc;
             }
@@ -1942,7 +2433,25 @@ def _tray_indicator_available() -> bool:
     return result.returncode == 0
 
 
-def run() -> int:
+def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(prog="cozmik-studio")
+    parser.add_argument(
+        "--minimized",
+        "--start-minimized",
+        "--hidden",
+        action="store_true",
+        dest="start_minimized",
+        help="Start hidden in the tray when available, otherwise start minimized.",
+    )
+    return parser.parse_args(argv)
+
+
+def _should_start_minimized(args: argparse.Namespace) -> bool:
+    return bool(args.start_minimized or load_startup_mode() == "minimized")
+
+
+def run(argv: list[str] | None = None) -> int:
+    args = _parse_args(argv)
     app = Adw.Application(application_id="dev.local.CozmikStudio")
 
     def activate(application: Adw.Application) -> None:
@@ -1950,9 +2459,9 @@ def run() -> int:
             if isinstance(window, MainWindow):
                 window._show_from_tray()
                 return
-        window = MainWindow(application)
+        window = MainWindow(application, start_minimized=_should_start_minimized(args))
         window.set_icon_name("cozmik-studio")
-        window.present()
+        window.show_at_startup()
 
     app.connect("activate", activate)
     return app.run(None)

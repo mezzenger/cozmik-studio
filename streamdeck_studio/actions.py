@@ -11,6 +11,7 @@ import webbrowser
 from collections.abc import Callable
 
 from .model import ButtonConfig
+from .plugins import PluginError, command_for_action, get_plugin_action, load_plugin_config, parse_plugin_target
 
 
 class ActionError(RuntimeError):
@@ -219,6 +220,8 @@ def run_action(config: ButtonConfig, copy_text: Callable[[str], None] | None = N
         return _run_key_press_action(target, "key presses")
     if not target:
         raise ActionError("The selected button has no target.")
+    if action_type == "plugin":
+        return _run_plugin_action(target)
     if action_type == "command":
         try:
             args = shlex.split(target)
@@ -259,6 +262,31 @@ def run_action(config: ButtonConfig, copy_text: Callable[[str], None] | None = N
         return paste_text_action(config, paste=paste)
 
     raise ActionError(f"Unsupported action type: {action_type}")
+
+
+def _run_plugin_action(target: str) -> str:
+    try:
+        plugin_id, action_id, settings = parse_plugin_target(target)
+    except PluginError as exc:
+        raise ActionError(str(exc)) from exc
+    action = get_plugin_action(plugin_id, action_id)
+    if not action:
+        raise ActionError(f"Plugin action not found: {plugin_id}.{action_id}")
+    merged_settings = {**load_plugin_config(plugin_id), **settings}
+    command = command_for_action(action, merged_settings)
+    try:
+        if action.shell:
+            if isinstance(command, list):
+                command = " ".join(shlex.quote(part) for part in command)
+            subprocess.Popen(command, shell=True, cwd=action.plugin_dir, start_new_session=True)
+        else:
+            args = shlex.split(command) if isinstance(command, str) else command
+            if not args:
+                raise ActionError(f"Plugin action has no command: {action.qualified_id}")
+            subprocess.Popen(args, cwd=action.plugin_dir, start_new_session=True)
+    except OSError as exc:
+        raise ActionError(f"Plugin action failed: {exc}") from exc
+    return f"Ran plugin action: {action.plugin_name} / {action.label}"
 
 
 def _run_media_action(target: str) -> str:
