@@ -1,6 +1,6 @@
 # Cozmik Studio
 
-![Cozmik Studio logo](Images/Cozmik_Studio_banner.png)
+![Cozmik Studio logo](streamdeck_studio/resources/branding/cozmik-studio-banner.png)
 
 A GNOME/GTK desktop app for assigning Stream Deck buttons to launcher actions.
 
@@ -135,7 +135,7 @@ Install a user-local command and desktop launcher:
 ./scripts/install-user.sh
 ```
 
-The installer also registers the Cozmik Studio desktop icon from `Images/Cozmik_Studio_icon.png` through `packaging/icons/cozmik-studio.png`. The installed launcher is named `dev.local.CozmikStudio.desktop` so GNOME can match the running app to its icon.
+The installer also registers the Cozmik Studio desktop icon from `streamdeck_studio/resources/branding/cozmik-studio-icon.png` through `packaging/icons/cozmik-studio.png`. The installed launcher is named `dev.local.CozmikStudio.desktop` so GNOME can match the running app to its icon.
 
 If the device is not accessible, the app still opens as an offline editor. On Linux, Stream Deck access usually requires the current user to have permission to the HID device through udev rules.
 
